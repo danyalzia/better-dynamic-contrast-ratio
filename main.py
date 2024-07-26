@@ -26,11 +26,21 @@ import win32gui
 import numpy as np
 
 CPU_MODE_FORCED = True
+PERFORMANCE_MODE = False
+LUMA_DIFFERENCE_THRESHOLD = 0
 
 MIN_BRIGHTNESS = 10
 MAX_BRIGHTNESS = 50
 
-# Luminance algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
+# Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
+# Performance mode is less accurate (more sensitive to luminiance changes)
+if PERFORMANCE_MODE:
+    luma_lut = [255.299, 255.299, 177.833]
+    base_width = 4
+else:
+    luma_lut = [2550.299, 2550.587, 1770.833]
+    base_width = 8
+    
 try:
     if CPU_MODE_FORCED:
         raise ValueError("[!] CPU Mode is forced, will use CPU (slower) version.")
@@ -44,11 +54,11 @@ try:
     print("Using PyTorch/CUDA... \n")
 
     def get_average_luminance(img):
-        transforms = v2.Compose([v2.PILToTensor(), v2.Resize(8)])
+        transforms = v2.Compose([v2.PILToTensor(), v2.Resize(base_width)])
 
         arr = transforms(img).permute(1, 2, 0).cuda()
 
-        d = torch.tensor([2550.299, 2550.587, 1770.833]).cuda()
+        d = torch.tensor(luma_lut).cuda()
 
         total_num_sum = np.prod(arr.shape[:-1])
         luminance_total = (arr / d).sum().item()
@@ -60,7 +70,6 @@ except (ModuleNotFoundError, ValueError) as err:
     print("Using CPU... \n")
 
     def get_average_luminance(img):
-        base_width = 8
 
         img_sizex, img_sizey = float(img.size[0]), float(img.size[1])
 
@@ -77,11 +86,13 @@ except (ModuleNotFoundError, ValueError) as err:
         if hsize == 0:
             hsize = 1
 
-        img = img.resize((base_width, hsize), Image.Resampling.LANCZOS)
+        img = img.resize((base_width, hsize), Image.Resampling.NEAREST)
 
         arr = np.array(img)
+        
         total_num_sum = np.prod(arr.shape[:-1])
-        luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
+            
+        luminance_total = (arr / luma_lut).sum()
         return luminance_total / total_num_sum
 
 
@@ -97,10 +108,13 @@ if __name__ == "__main__":
 
         img = ImageGrab.grab(bbox)
 
-        average_luminance = get_average_luminance(img) * 255
-
         try:
-            luma = int(str(average_luminance)[:2])
+            luma = get_average_luminance(img) * 255
+            
+            if PERFORMANCE_MODE:
+                luma = round(luma / 10)
+            else:
+                luma = round(luma)
         except ValueError:
             luma = 0
 
@@ -108,6 +122,12 @@ if __name__ == "__main__":
 
         # Skip if the luma is same as current monitor's brightness
         if luma == brightness:
+            continue
+        
+        if LUMA_DIFFERENCE_THRESHOLD != 0 and luma > brightness and (luma - brightness) < LUMA_DIFFERENCE_THRESHOLD:
+            continue
+        
+        if LUMA_DIFFERENCE_THRESHOLD != 0 and luma < brightness and (brightness - luma) < LUMA_DIFFERENCE_THRESHOLD:
             continue
         
         if luma < MIN_BRIGHTNESS:
