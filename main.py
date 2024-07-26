@@ -25,12 +25,16 @@ from PIL import ImageGrab, Image
 import win32gui
 import numpy as np
 
+CPU_MODE_FORCED = True
+
 MIN_BRIGHTNESS = 10
 MAX_BRIGHTNESS = 50
 
 # Luminance algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
-
 try:
+    if CPU_MODE_FORCED:
+        raise ValueError("[!] CPU Mode is forced, will use CPU (slower) version.")
+
     import torch
     from torchvision.transforms import v2
 
@@ -58,10 +62,23 @@ except (ModuleNotFoundError, ValueError) as err:
     def get_average_luminance(img):
         base_width = 8
 
-        wpercent = base_width / float(img.size[0])
-        hsize = int((float(img.size[1]) * float(wpercent)))
+        img_sizex, img_sizey = float(img.size[0]), float(img.size[1])
+
+        if img_sizex == 0.0:
+            img_sizex = 1.0
+            
+        if img_sizey == 0.0:
+            img_sizey = 1.0
+            
+        wpercent = base_width / img_sizex
+
+        hsize = int((img_sizey * float(wpercent)))
+
+        if hsize == 0:
+            hsize = 1
+
         img = img.resize((base_width, hsize), Image.Resampling.LANCZOS)
-        
+
         arr = np.array(img)
         total_num_sum = np.prod(arr.shape[:-1])
         luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
@@ -85,11 +102,14 @@ if __name__ == "__main__":
         try:
             luma = int(str(average_luminance)[:2])
         except ValueError:
-            print(str(average_luminance))
             luma = 0
 
         brightness = sbc.get_brightness()[0]
 
+        # Skip if the luma is same as current monitor's brightness
+        if luma == brightness:
+            continue
+        
         if luma < MIN_BRIGHTNESS:
             sbc.fade_brightness(MIN_BRIGHTNESS, interval=0)
             print(f"Luma: {luma}. Clamping to max brightness: {MIN_BRIGHTNESS}")
