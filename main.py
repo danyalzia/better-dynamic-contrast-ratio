@@ -19,55 +19,53 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import dxcam
 
 import threading
 import time
 import screen_brightness_control as sbc
-from PIL import ImageGrab, Image
-import win32gui
 import numpy as np
 
 from monitorcontrol import get_monitors
 
 CPU_MODE_FORCED = True
 PERFORMANCE_MODE = False
-EXPERIMENTAL_CONTRAST_ADAPTATION = False
 
+EXPERIMENTAL_CONTRAST_ADAPTATION = False  # Work in Progress
+
+ADJUSTMENT_INTERVAL = 0.1
+BLOCKING = False
 LUMA_DIFFERENCE_THRESHOLD = 0
 
 MIN_BRIGHTNESS = 0
 MAX_BRIGHTNESS = 100
 
+MAKE_ADJUSTMENTS_INSTANT = False
+
 # Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
 # Performance mode is less accurate (more sensitive to luminiance changes)
 if PERFORMANCE_MODE:
     luma_lut = [255.299, 255.299, 177.833]
-    base_width = 4
 else:
     luma_lut = [2550.299, 2550.587, 1770.833]
-    base_width = 8
 
 try:
     if CPU_MODE_FORCED:
         raise ValueError("[!] CPU Mode is forced, will use CPU (slower) version.")
 
     import torch
-    from torchvision.transforms import v2
 
     if not torch.cuda.is_available():
         raise ValueError("[!] CUDA is not available, will use CPU (slower) version.")
 
     print("Using PyTorch/CUDA... \n")
 
-    def get_average_luminance(img):
-        transforms = v2.Compose([v2.PILToTensor(), v2.Resize(base_width)])
-
-        arr = transforms(img).permute(1, 2, 0).cuda()
-
+    def get_average_luminance(arr):
+        arr = torch.tensor(arr).cuda()
         d = torch.tensor(luma_lut).cuda()
 
         total_num_sum = np.prod(arr.shape[:-1])
-        luminance_total = (arr / d).sum().item()
+        luminance_total = (arr / d).sum().cuda().item()
         return luminance_total / total_num_sum
 
 except (ModuleNotFoundError, ValueError) as err:
@@ -75,29 +73,8 @@ except (ModuleNotFoundError, ValueError) as err:
 
     print("Using CPU... \n")
 
-    def get_average_luminance(img):
-
-        img_sizex, img_sizey = float(img.size[0]), float(img.size[1])
-
-        if img_sizex == 0.0:
-            img_sizex = 1.0
-
-        if img_sizey == 0.0:
-            img_sizey = 1.0
-
-        wpercent = base_width / img_sizex
-
-        hsize = int((img_sizey * float(wpercent)))
-
-        if hsize == 0:
-            hsize = 1
-
-        img = img.resize((base_width, hsize), Image.Resampling.NEAREST)
-
-        arr = np.array(img)
-
+    def get_average_luminance(arr):
         total_num_sum = np.prod(arr.shape[:-1])
-
         luminance_total = (arr / luma_lut).sum()
         return luminance_total / total_num_sum
 
@@ -149,19 +126,23 @@ def fade_contrast(monitor, value: int, current: int, interval: float):
 if __name__ == "__main__":
     monitor = get_monitors()[0]
 
-    while True:
-        while True:
-            try:
-                # Sometimes it can't retreive the current/foreground window when doing a lot of alt-tab operations
-                bbox = win32gui.GetWindowRect(win32gui.GetForegroundWindow())
-                break
-            except Exception:
-                continue
+    # width, height = 1920, 1200
+    # size = 100
+    # # Take the center of the screen
+    # left, top = (width - size) // 2, (height - size) // 2
+    # right, bottom = left + size, top + size
+    # region = (left, top, right, bottom)
 
-        img = ImageGrab.grab(bbox)
+    camera = dxcam.create(output_idx=0, output_color="GRAY")
+    camera.start()
+
+    import time
+
+    while True:
+        frame = camera.get_latest_frame()
 
         try:
-            luma = get_average_luminance(img) * 255
+            luma = get_average_luminance(frame) * 255
 
             luma = round(luma / 10) if PERFORMANCE_MODE else round(luma)
         except ValueError:
@@ -188,15 +169,33 @@ if __name__ == "__main__":
             continue
 
         if luma < MIN_BRIGHTNESS:
-            sbc.fade_brightness(MIN_BRIGHTNESS, interval=0)
+            (
+                sbc.set_brightness(MIN_BRIGHTNESS)
+                if MAKE_ADJUSTMENTS_INSTANT
+                else sbc.fade_brightness(
+                    MIN_BRIGHTNESS, interval=ADJUSTMENT_INTERVAL, blocking=BLOCKING
+                )
+            )
             print(f"Luma: {luma}. Clamping to min brightness: {MIN_BRIGHTNESS}")
 
         if luma > MAX_BRIGHTNESS:
-            sbc.fade_brightness(MAX_BRIGHTNESS, interval=0)
+            (
+                sbc.set_brightness(MAX_BRIGHTNESS)
+                if MAKE_ADJUSTMENTS_INSTANT
+                else sbc.fade_brightness(
+                    MAX_BRIGHTNESS, interval=ADJUSTMENT_INTERVAL, blocking=BLOCKING
+                )
+            )
             print(f"Luma: {luma}. Clamping to max brightness: {MAX_BRIGHTNESS}")
 
         if luma >= MIN_BRIGHTNESS and luma <= MAX_BRIGHTNESS:
-            sbc.fade_brightness(luma, interval=0)
+            (
+                sbc.set_brightness(luma)
+                if MAKE_ADJUSTMENTS_INSTANT
+                else sbc.fade_brightness(
+                    luma, interval=ADJUSTMENT_INTERVAL, blocking=BLOCKING
+                )
+            )
             print(f"Brightness: {luma}")
 
         if EXPERIMENTAL_CONTRAST_ADAPTATION:
@@ -208,11 +207,17 @@ if __name__ == "__main__":
                 except Exception:
                     continue
 
+            # Work in progress
             # Naive implementation but helps in gradual adjustments of display's luminance
             # It also leads to less washed out (relaxing) colors in high luminance content
             # Blacks are not improved though in very low lumninance content
             average_contrast = 100 - luma
 
             if average_contrast != contrast:
-                fade_contrast(monitor, average_contrast, contrast, interval=0)
+                fade_contrast(
+                    monitor, average_contrast, contrast, interval=ADJUSTMENT_INTERVAL
+                )
                 print(f"Contrast: {average_contrast} (from {contrast})")
+    else:
+        camera.stop()
+        del camera
