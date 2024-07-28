@@ -29,12 +29,18 @@ import time
 import screen_brightness_control as sbc
 import numpy as np
 
-from monitorcontrol import get_monitors
+from monitorcontrol import get_monitors, VCPError
 
+# If two monitors are connected then by default the program will run on primary monitor
+# Set it to 1 to run on external/second monitor
+MONITOR_INDEX = 0
+# VRR is not currently supported
+# Program must be running at the current refresh rate of monitor otherwise it behaves badly
+TARGET_FPS = 60
 # Forcing CPU for now because CPU (numpy based) luminance calculating algorithms are actually faster due to PyTorch/CUDA overhead
 CPU_MODE_FORCED = True
 
-BRIGHTNESS_ADAPTATION = True
+BRIGHTNESS_ADAPTATION = True # It's main functionality; you don't want to disable it :D
 EXPERIMENTAL_BRIGHTNESS_ADAPTIVE_INCREMENTS = False  # Work in Progress
 EXPERIMENTAL_CONTRAST_ADAPTATION = (
     False  # Work in Progress (Don't use it in combination of GAMMA RAMP)
@@ -46,7 +52,7 @@ BRIGHTNESS_INSTANT_ADJUSTMENTS = False
 
 CONTRAST_ADJUSTMENT_INTERVAL = 0.1
 
-BLOCKING = False
+BLOCKING = True # Keep it enabled as disabling it causes a bunch of threads related bugs; needs a lot of testing
 
 # Tolerance levels
 LUMA_DIFFERENCE_THRESHOLD = 0
@@ -374,358 +380,377 @@ if __name__ == "__main__":
     # right, bottom = left + size, top + size
     # region = (left, top, right, bottom)
 
-    camera = dxcam.create(output_idx=0, output_color="GRAY")
-    camera.start()
+    try:
+        camera = dxcam.create(output_idx=MONITOR_INDEX, output_color="GRAY")
+    except IndexError as e:
+        raise RuntimeError(
+            f"Monitor at index {MONITOR_INDEX} is not available, please try a different value."
+        ) from e
 
-    while True:
-        frame = camera.get_latest_frame()
+    camera.start(target_fps=TARGET_FPS)
 
-        try:
-            # current_time = time.time()
-            # luma = get_average_luminance1(frame)
-            # print(
-            #     f"Luma1: {luma} ------------- took {time.time() - current_time} seconds"
-            # )
-
-            # current_time = time.time()
-            # luma = get_average_luminance2(frame)
-            # print(
-            #     f"Luma2: {luma} ------------- took {time.time() - current_time} seconds"
-            # )
-
-            # current_time = time.time()
-            # luma = get_average_luminance3(frame)
-            # print(
-            #     f"Luma3: {luma} ------------- took {time.time() - current_time} seconds"
-            # )
-            luma = get_average_luminance3(frame)
-
-            luma = round(luma)
-        except ValueError:
-            luma = 0
-
-        if EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
-            # May need more than just average luma to adjust gamma appropriately
-            # For now, I am certain approximations according to anecdotal experience
-            adjusted_gamma = (100 - luma) / 82
-            adjusted_gamma = clamp(adjusted_gamma, MIN_GAMMA, MAX_GAMMA)
-
-            # Skip if adjusted gamma is same as previous gamma
-            if (
-                adjusted_gamma != gamma
-                and not (
-                    GAMMA_DIFFERENCE_THRESHOLD != 0.0
-                    and adjusted_gamma > gamma
-                    and (adjusted_gamma - gamma) < GAMMA_DIFFERENCE_THRESHOLD
-                )
-                and not (
-                    GAMMA_DIFFERENCE_THRESHOLD != 0.0
-                    and adjusted_gamma < gamma
-                    and (gamma - adjusted_gamma) < GAMMA_DIFFERENCE_THRESHOLD
-                )
-            ):
-                fade_gamma(
-                    SetDeviceGammaRamp,
-                    hdc,
-                    default_gamma_ramp,
-                    adjusted_gamma,
-                    gamma,
-                    interval=0.01,
-                    increment=0.01,
-                )
-
-                print(f"Gamma: {adjusted_gamma} (from {gamma})")
-
-                gamma = adjusted_gamma
-
-        if BRIGHTNESS_ADAPTATION:
-            brightness = sbc.get_brightness()[0]
-
-            # Skip if the luma is same as current monitor's brightness
-            if luma == brightness:
-                continue
-
-            if (
-                LUMA_DIFFERENCE_THRESHOLD != 0
-                and luma > brightness
-                and (luma - brightness) < LUMA_DIFFERENCE_THRESHOLD
-            ):
-                continue
-
-            if (
-                LUMA_DIFFERENCE_THRESHOLD != 0
-                and luma < brightness
-                and (brightness - luma) < LUMA_DIFFERENCE_THRESHOLD
-            ):
-                continue
-
-            if luma < MIN_BRIGHTNESS:
-                (
-                    sbc.set_brightness(MIN_BRIGHTNESS)
-                    if BRIGHTNESS_INSTANT_ADJUSTMENTS
-                    else sbc.fade_brightness(
-                        MIN_BRIGHTNESS,
-                        interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                        blocking=BLOCKING,
-                    )
-                )
-                brightness = luma
-                print(f"Luma: {luma}. Clamping to min brightness: {MIN_BRIGHTNESS}")
-
-            elif luma > MAX_BRIGHTNESS:
-                (
-                    sbc.set_brightness(MAX_BRIGHTNESS)
-                    if BRIGHTNESS_INSTANT_ADJUSTMENTS
-                    else sbc.fade_brightness(
-                        MAX_BRIGHTNESS,
-                        interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                        blocking=BLOCKING,
-                    )
-                )
-                brightness = luma
-                print(f"Luma: {luma}. Clamping to max brightness: {MAX_BRIGHTNESS}")
-
-            else:
-                if not EXPERIMENTAL_BRIGHTNESS_ADAPTIVE_INCREMENTS:
-                    (
-                        sbc.set_brightness(luma)
-                        if BRIGHTNESS_INSTANT_ADJUSTMENTS
-                        else sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                        )
-                    )
-                    print(f"Brightness: {luma} (from {brightness})")
-                    brightness = luma
-                else:
-                    # Adaptive intervals
-                    diff_for_instant = 50
-                    diff_for_2x_interval = 10
-                    diff_for_3x_interval = 20
-                    diff_for_4x_interval = 30
-                    diff_for_5x_interval = 40
-                    if (
-                        luma > brightness
-                        and (change_in_luma := (luma - brightness)) > diff_for_instant
-                    ):
-                        print(
-                            f"Too much sudden increase in brightness: {luma} from {brightness}"
-                        )
-                        sbc.set_brightness(luma)
-                        brightness = luma
-                    elif (
-                        luma > brightness
-                        and (change_in_luma := (luma - brightness))
-                        > diff_for_2x_interval
-                    ):
-                        print(
-                            f"Sudden increase in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=2,
-                        )
-                        brightness = luma
-                    elif (
-                        luma > brightness
-                        and (change_in_luma := (luma - brightness))
-                        > diff_for_3x_interval
-                    ):
-                        print(
-                            f"Sudden increase in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=3,
-                        )
-                        brightness = luma
-                    elif (
-                        luma > brightness
-                        and (change_in_luma := (luma - brightness))
-                        > diff_for_4x_interval
-                    ):
-                        print(
-                            f"Sudden increase in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=4,
-                        )
-                        brightness = luma
-                    elif (
-                        luma > brightness
-                        and (change_in_luma := (luma - brightness))
-                        > diff_for_5x_interval
-                    ):
-                        print(
-                            f"Sudden increase in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=5,
-                        )
-                        brightness = luma
-                    elif (
-                        luma < brightness
-                        and (change_in_luma := (brightness - luma)) > diff_for_instant
-                    ):
-                        print(
-                            f"Too much sudden decrease in brightness: {luma} from {brightness}"
-                        )
-                        sbc.set_brightness(luma)
-                        brightness = luma
-                    elif (
-                        luma < brightness
-                        and (change_in_luma := (brightness - luma))
-                        > diff_for_2x_interval
-                    ):
-                        print(
-                            f"Sudden decrease in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=2,
-                        )
-                        brightness = luma
-                    elif (
-                        luma < brightness
-                        and (change_in_luma := (brightness - luma))
-                        > diff_for_3x_interval
-                    ):
-                        print(
-                            f"Sudden decrease in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=3,
-                        )
-                        brightness = luma
-                    elif (
-                        luma < brightness
-                        and (change_in_luma := (brightness - luma))
-                        > diff_for_4x_interval
-                    ):
-                        print(
-                            f"Sudden decrease in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=4,
-                        )
-                        brightness = luma
-                    elif (
-                        luma < brightness
-                        and (change_in_luma := (brightness - luma))
-                        > diff_for_5x_interval
-                    ):
-                        print(
-                            f"Sudden decrease in brightness: {luma} from {brightness}"
-                        )
-                        sbc.fade_brightness(
-                            luma,
-                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            blocking=BLOCKING,
-                            increment=5,
-                        )
-                        brightness = luma
-                    else:
-                        brightness = sbc.get_brightness()[0]
-                        if luma != brightness:
-                            (
-                                sbc.set_brightness(luma)
-                                if BRIGHTNESS_INSTANT_ADJUSTMENTS
-                                else sbc.fade_brightness(
-                                    luma,
-                                    interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                    blocking=BLOCKING,
-                                )
-                            )
-                            print(f"Brightness: {luma} (from {brightness})")
-                            brightness = luma
-
-        if EXPERIMENTAL_CONTRAST_ADAPTATION:
-            while True:
-                try:
-                    with monitor:
-                        contrast = monitor.get_contrast()
+    try:
+        while True:
+            # This is almost 2-3 times faster than sbc.get_brightness()[0]
+            with monitor:
+                while True:
+                    try:
+                        brightness = monitor.get_luminance()
                         break
-                except Exception:
+                    except VCPError:
+                        continue
+
+            frame = camera.get_latest_frame()
+
+            try:
+                # current_time = time.time()
+                # luma = get_average_luminance1(frame)
+                # print(
+                #     f"Luma1: {luma} ------------- took {time.time() - current_time} seconds"
+                # )
+
+                # current_time = time.time()
+                # luma = get_average_luminance2(frame)
+                # print(
+                #     f"Luma2: {luma} ------------- took {time.time() - current_time} seconds"
+                # )
+
+                # current_time = time.time()
+                # luma = get_average_luminance3(frame)
+                # print(
+                #     f"Luma3: {luma} ------------- took {time.time() - current_time} seconds"
+                # )
+                luma = get_average_luminance3(frame)
+
+                luma = round(luma)
+            except ValueError:
+                luma = 0
+
+            if EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
+                # May need more than just average luma to adjust gamma appropriately
+                # For now, I am certain approximations according to anecdotal experience
+                adjusted_gamma = (100 - luma) / 82
+                adjusted_gamma = clamp(adjusted_gamma, MIN_GAMMA, MAX_GAMMA)
+
+                # Skip if adjusted gamma is same as previous gamma
+                if (
+                    adjusted_gamma != gamma
+                    and not (
+                        GAMMA_DIFFERENCE_THRESHOLD != 0.0
+                        and adjusted_gamma > gamma
+                        and (adjusted_gamma - gamma) < GAMMA_DIFFERENCE_THRESHOLD
+                    )
+                    and not (
+                        GAMMA_DIFFERENCE_THRESHOLD != 0.0
+                        and adjusted_gamma < gamma
+                        and (gamma - adjusted_gamma) < GAMMA_DIFFERENCE_THRESHOLD
+                    )
+                ):
+                    fade_gamma(
+                        SetDeviceGammaRamp,
+                        hdc,
+                        default_gamma_ramp,
+                        adjusted_gamma,
+                        gamma,
+                        interval=0.01,
+                        increment=0.01,
+                    )
+
+                    print(f"Gamma: {adjusted_gamma} (from {gamma})")
+
+                    gamma = adjusted_gamma
+
+            if BRIGHTNESS_ADAPTATION:
+                # Skip if the luma is same as current monitor's brightness
+                if luma == brightness:
+                    print(" ...Skipping brightness adjustment... ")
                     continue
 
-            # Work in progress
-            # Naive implementation but helps in gradual adjustments of display's luminance
-            # It also leads to less washed out (relaxing) colors in high luminance content
-            # Blacks are not improved though in very low lumninance content
-            average_contrast = 100 - luma
+                if (
+                    LUMA_DIFFERENCE_THRESHOLD != 0
+                    and luma > brightness
+                    and (luma - brightness) < LUMA_DIFFERENCE_THRESHOLD
+                ):
+                    continue
 
-            if average_contrast == contrast:
-                continue
+                if (
+                    LUMA_DIFFERENCE_THRESHOLD != 0
+                    and luma < brightness
+                    and (brightness - luma) < LUMA_DIFFERENCE_THRESHOLD
+                ):
+                    continue
 
-            if (
-                CONTRAST_DIFFERENCE_THRESHOLD != 0
-                and average_contrast > contrast
-                and (average_contrast - contrast) < CONTRAST_DIFFERENCE_THRESHOLD
-            ):
-                continue
+                if luma < MIN_BRIGHTNESS:
+                    (
+                        sbc.set_brightness(MIN_BRIGHTNESS)
+                        if BRIGHTNESS_INSTANT_ADJUSTMENTS
+                        else sbc.fade_brightness(
+                            MIN_BRIGHTNESS,
+                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            blocking=BLOCKING,
+                        )
+                    )
+                    # brightness = luma
+                    print(f"Luma: {luma}. Clamping to min brightness: {MIN_BRIGHTNESS}")
 
-            if (
-                CONTRAST_DIFFERENCE_THRESHOLD != 0
-                and average_contrast < contrast
-                and (contrast - average_contrast) < CONTRAST_DIFFERENCE_THRESHOLD
-            ):
-                continue
+                elif luma > MAX_BRIGHTNESS:
+                    (
+                        sbc.set_brightness(MAX_BRIGHTNESS)
+                        if BRIGHTNESS_INSTANT_ADJUSTMENTS
+                        else sbc.fade_brightness(
+                            MAX_BRIGHTNESS,
+                            interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            blocking=BLOCKING,
+                        )
+                    )
+                    # brightness = luma
+                    print(f"Luma: {luma}. Clamping to max brightness: {MAX_BRIGHTNESS}")
 
-            if average_contrast < MIN_CONTRAST:
-                fade_contrast(
-                    monitor,
-                    MIN_CONTRAST,
-                    contrast,
-                    interval=CONTRAST_ADJUSTMENT_INTERVAL,
-                )
-                print(
-                    f"Contrast: {average_contrast}. Clamping to min contrast: {MIN_CONTRAST}"
-                )
-                contrast = average_contrast
+                else:
+                    if not EXPERIMENTAL_BRIGHTNESS_ADAPTIVE_INCREMENTS:
+                        (
+                            sbc.set_brightness(luma)
+                            if BRIGHTNESS_INSTANT_ADJUSTMENTS
+                            else sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                            )
+                        )
+                        print(f"Brightness: {luma} (from {brightness})")
+                        # brightness = luma
+                    else:
+                        # Adaptive intervals
+                        diff_for_instant = 50
+                        diff_for_2x_interval = 10
+                        diff_for_3x_interval = 20
+                        diff_for_4x_interval = 30
+                        diff_for_5x_interval = 40
+                        if (
+                            luma > brightness
+                            and (change_in_luma := (luma - brightness))
+                            > diff_for_instant
+                        ):
+                            print(
+                                f"Too much sudden increase in brightness: {luma} from {brightness}"
+                            )
+                            sbc.set_brightness(luma)
+                            brightness = luma
+                        elif (
+                            luma > brightness
+                            and (change_in_luma := (luma - brightness))
+                            > diff_for_2x_interval
+                        ):
+                            print(
+                                f"Sudden increase in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=2,
+                            )
+                            brightness = luma
+                        elif (
+                            luma > brightness
+                            and (change_in_luma := (luma - brightness))
+                            > diff_for_3x_interval
+                        ):
+                            print(
+                                f"Sudden increase in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=3,
+                            )
+                            brightness = luma
+                        elif (
+                            luma > brightness
+                            and (change_in_luma := (luma - brightness))
+                            > diff_for_4x_interval
+                        ):
+                            print(
+                                f"Sudden increase in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=4,
+                            )
+                            brightness = luma
+                        elif (
+                            luma > brightness
+                            and (change_in_luma := (luma - brightness))
+                            > diff_for_5x_interval
+                        ):
+                            print(
+                                f"Sudden increase in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=5,
+                            )
+                            brightness = luma
+                        elif (
+                            luma < brightness
+                            and (change_in_luma := (brightness - luma))
+                            > diff_for_instant
+                        ):
+                            print(
+                                f"Too much sudden decrease in brightness: {luma} from {brightness}"
+                            )
+                            sbc.set_brightness(luma)
+                            brightness = luma
+                        elif (
+                            luma < brightness
+                            and (change_in_luma := (brightness - luma))
+                            > diff_for_2x_interval
+                        ):
+                            print(
+                                f"Sudden decrease in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=2,
+                            )
+                            brightness = luma
+                        elif (
+                            luma < brightness
+                            and (change_in_luma := (brightness - luma))
+                            > diff_for_3x_interval
+                        ):
+                            print(
+                                f"Sudden decrease in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=3,
+                            )
+                            brightness = luma
+                        elif (
+                            luma < brightness
+                            and (change_in_luma := (brightness - luma))
+                            > diff_for_4x_interval
+                        ):
+                            print(
+                                f"Sudden decrease in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=4,
+                            )
+                            brightness = luma
+                        elif (
+                            luma < brightness
+                            and (change_in_luma := (brightness - luma))
+                            > diff_for_5x_interval
+                        ):
+                            print(
+                                f"Sudden decrease in brightness: {luma} from {brightness}"
+                            )
+                            sbc.fade_brightness(
+                                luma,
+                                interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                blocking=BLOCKING,
+                                increment=5,
+                            )
+                            brightness = luma
+                        else:
+                            if luma != brightness:
+                                (
+                                    sbc.set_brightness(luma)
+                                    if BRIGHTNESS_INSTANT_ADJUSTMENTS
+                                    else sbc.fade_brightness(
+                                        luma,
+                                        interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                        blocking=BLOCKING,
+                                    )
+                                )
+                                print(f"Brightness: {luma} (from {brightness})")
+                                brightness = luma
 
-            elif average_contrast > MAX_CONTRAST:
-                fade_contrast(
-                    monitor,
-                    MAX_CONTRAST,
-                    contrast,
-                    interval=CONTRAST_ADJUSTMENT_INTERVAL,
-                )
-                print(
-                    f"Contrast: {average_contrast}. Clamping to max contrast: {MAX_CONTRAST}"
-                )
-                contrast = average_contrast
+            if EXPERIMENTAL_CONTRAST_ADAPTATION:
+                while True:
+                    try:
+                        with monitor:
+                            contrast = monitor.get_contrast()
+                            break
+                    except Exception:
+                        continue
 
-            elif luma <= MAX_CONTRAST:
-                fade_contrast(
-                    monitor,
-                    average_contrast,
-                    contrast,
-                    interval=CONTRAST_ADJUSTMENT_INTERVAL,
-                )
-                print(f"Contrast: {average_contrast} (from {contrast})")
-                contrast = average_contrast
-    else:
+                # Work in progress
+                # Naive implementation but helps in gradual adjustments of display's luminance
+                # It also leads to less washed out (relaxing) colors in high luminance content
+                # Blacks are not improved though in very low lumninance content
+                average_contrast = 100 - luma
+
+                if average_contrast == contrast:
+                    continue
+
+                if (
+                    CONTRAST_DIFFERENCE_THRESHOLD != 0
+                    and average_contrast > contrast
+                    and (average_contrast - contrast) < CONTRAST_DIFFERENCE_THRESHOLD
+                ):
+                    continue
+
+                if (
+                    CONTRAST_DIFFERENCE_THRESHOLD != 0
+                    and average_contrast < contrast
+                    and (contrast - average_contrast) < CONTRAST_DIFFERENCE_THRESHOLD
+                ):
+                    continue
+
+                if average_contrast < MIN_CONTRAST:
+                    fade_contrast(
+                        monitor,
+                        MIN_CONTRAST,
+                        contrast,
+                        interval=CONTRAST_ADJUSTMENT_INTERVAL,
+                    )
+                    print(
+                        f"Contrast: {average_contrast}. Clamping to min contrast: {MIN_CONTRAST}"
+                    )
+                    contrast = average_contrast
+
+                elif average_contrast > MAX_CONTRAST:
+                    fade_contrast(
+                        monitor,
+                        MAX_CONTRAST,
+                        contrast,
+                        interval=CONTRAST_ADJUSTMENT_INTERVAL,
+                    )
+                    print(
+                        f"Contrast: {average_contrast}. Clamping to max contrast: {MAX_CONTRAST}"
+                    )
+                    contrast = average_contrast
+
+                elif luma <= MAX_CONTRAST:
+                    fade_contrast(
+                        monitor,
+                        average_contrast,
+                        contrast,
+                        interval=CONTRAST_ADJUSTMENT_INTERVAL,
+                    )
+                    print(f"Contrast: {average_contrast} (from {contrast})")
+                    contrast = average_contrast
+    except KeyboardInterrupt:
+        print("[!] Programm interrupted. Closing now... ")
         camera.stop()
         del camera
 
-        if ReleaseDC(hdc):
-            print("HDC released")
+        if EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS and not ReleaseDC(hdc):
+            print("[!] Could not release the HDC")
+
+        time.sleep(1)
