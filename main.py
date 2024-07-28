@@ -40,19 +40,19 @@ TARGET_FPS = 60
 # Forcing CPU for now because CPU (numpy based) luminance calculating algorithms are actually faster due to PyTorch/CUDA overhead
 CPU_MODE_FORCED = True
 
-BRIGHTNESS_ADAPTATION = True # It's main functionality; you don't want to disable it :D
+BRIGHTNESS_ADAPTATION = True  # It's main functionality; you don't want to disable it :D
 EXPERIMENTAL_BRIGHTNESS_ADAPTIVE_INCREMENTS = False  # Work in Progress
 EXPERIMENTAL_CONTRAST_ADAPTATION = (
     False  # Work in Progress (Don't use it in combination of GAMMA RAMP)
 )
 EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS = False  # Work in Progress
 
+BRIGHTNESS_INSTANT_ADJUSTMENTS = True
 BRIGHTNESS_ADJUSTMENT_INTERVAL = 0.1
-BRIGHTNESS_INSTANT_ADJUSTMENTS = False
 
 CONTRAST_ADJUSTMENT_INTERVAL = 0.1
 
-BLOCKING = True # Keep it enabled as disabling it causes a bunch of threads related bugs; needs a lot of testing
+BLOCKING = True  # Keep it enabled as disabling it causes a bunch of threads related bugs; needs a lot of testing
 
 # Tolerance levels
 LUMA_DIFFERENCE_THRESHOLD = 0
@@ -535,7 +535,6 @@ if __name__ == "__main__":
                                 f"Too much sudden increase in brightness: {luma} from {brightness}"
                             )
                             sbc.set_brightness(luma)
-                            brightness = luma
                         elif (
                             luma > brightness
                             and (change_in_luma := (luma - brightness))
@@ -550,7 +549,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=2,
                             )
-                            brightness = luma
                         elif (
                             luma > brightness
                             and (change_in_luma := (luma - brightness))
@@ -565,7 +563,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=3,
                             )
-                            brightness = luma
                         elif (
                             luma > brightness
                             and (change_in_luma := (luma - brightness))
@@ -580,7 +577,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=4,
                             )
-                            brightness = luma
                         elif (
                             luma > brightness
                             and (change_in_luma := (luma - brightness))
@@ -595,7 +591,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=5,
                             )
-                            brightness = luma
                         elif (
                             luma < brightness
                             and (change_in_luma := (brightness - luma))
@@ -605,7 +600,6 @@ if __name__ == "__main__":
                                 f"Too much sudden decrease in brightness: {luma} from {brightness}"
                             )
                             sbc.set_brightness(luma)
-                            brightness = luma
                         elif (
                             luma < brightness
                             and (change_in_luma := (brightness - luma))
@@ -620,7 +614,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=2,
                             )
-                            brightness = luma
                         elif (
                             luma < brightness
                             and (change_in_luma := (brightness - luma))
@@ -635,7 +628,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=3,
                             )
-                            brightness = luma
                         elif (
                             luma < brightness
                             and (change_in_luma := (brightness - luma))
@@ -650,7 +642,6 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=4,
                             )
-                            brightness = luma
                         elif (
                             luma < brightness
                             and (change_in_luma := (brightness - luma))
@@ -665,21 +656,18 @@ if __name__ == "__main__":
                                 blocking=BLOCKING,
                                 increment=5,
                             )
-                            brightness = luma
                         else:
-                            if luma != brightness:
-                                (
-                                    sbc.set_brightness(luma)
-                                    if BRIGHTNESS_INSTANT_ADJUSTMENTS
-                                    else sbc.fade_brightness(
-                                        luma,
-                                        interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                        blocking=BLOCKING,
-                                    )
+                            (
+                                sbc.set_brightness(luma)
+                                if BRIGHTNESS_INSTANT_ADJUSTMENTS
+                                else sbc.fade_brightness(
+                                    luma,
+                                    interval=BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                    blocking=BLOCKING,
                                 )
-                                print(f"Brightness: {luma} (from {brightness})")
-                                brightness = luma
-
+                            )
+                            print(f"Brightness: {luma} (from {brightness})")
+                        brightness = luma
             if EXPERIMENTAL_CONTRAST_ADAPTATION:
                 while True:
                     try:
