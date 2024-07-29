@@ -26,8 +26,9 @@ import math
 
 import time
 import numpy as np
+import ctypes
+from ctypes.wintypes import DWORD, HANDLE, BYTE, WCHAR
 
-from monitorcontrol import get_monitors, VCPError
 import config
 
 # Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
@@ -105,8 +106,61 @@ except (ModuleNotFoundError, ValueError) as err:
         return (luminance / 255) * 100
 
 
+class PhysicalMonitor(ctypes.Structure):
+    _fields_ = [("handle", HANDLE), ("description", WCHAR * 128)]
+
+
+def get_primary_monitor_handle():
+    monitor_HMONITOR = ctypes.windll.user32.MonitorFromPoint(0, 0, 1)
+    physical_monitors = (PhysicalMonitor * 1)()
+
+    ctypes.windll.dxva2.GetPhysicalMonitorsFromHMONITOR(
+        monitor_HMONITOR, 1, physical_monitors
+    )
+
+    return physical_monitors[0].handle
+
+
+def vcp_set_luminance(handle, value):
+    ctypes.windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x10), DWORD(value))
+
+
+def vcp_get_luminance(handle):
+    feature_current = DWORD()
+    feature_max = DWORD()
+
+    ctypes.windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
+        HANDLE(handle),
+        BYTE(0x10),
+        None,
+        ctypes.byref(feature_current),
+        ctypes.byref(feature_max),
+    )
+
+    return feature_current.value
+
+
+def vcp_set_contrast(handle, value):
+    ctypes.windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x12), DWORD(value))
+
+
+def vcp_get_contrast(handle):
+    feature_current = DWORD()
+    feature_max = DWORD()
+
+    ctypes.windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
+        HANDLE(handle),
+        BYTE(0x12),
+        None,
+        ctypes.byref(feature_current),
+        ctypes.byref(feature_max),
+    )
+
+    return feature_current.value
+
+
 def fade_brightness(
-    monitor, finish: int, start: int, interval: float, increment: int = 1
+    handle, finish: int, start: int, interval: float, increment: int = 1
 ):
     increment = abs(increment)
     if start > finish:
@@ -114,7 +168,7 @@ def fade_brightness(
 
     next_change_start_time = time.time()
     for value in range(start, finish, increment):
-        monitor.set_luminance(value)
+        vcp_set_luminance(handle, value)
 
         next_change_start_time += interval
         sleep_time = next_change_start_time - time.time()
@@ -125,9 +179,7 @@ def fade_brightness(
     return finish
 
 
-def fade_contrast(
-    monitor, finish: int, start: int, interval: float, increment: int = 1
-):
+def fade_contrast(handle, finish: int, start: int, interval: float, increment: int = 1):
     increment = abs(increment)
     if start > finish:
         increment = -increment
@@ -135,7 +187,7 @@ def fade_contrast(
     next_change_start_time = time.time()
 
     for value in range(start, finish, increment):
-        monitor.set_contrast(value)
+        vcp_set_contrast(handle, value)
 
         next_change_start_time += interval
         sleep_time = next_change_start_time - time.time()
@@ -296,19 +348,13 @@ if __name__ == "__main__":
         gamma = 0.90
         set_gamma(SetDeviceGammaRamp, hdc, default_gamma_ramp, gamma)
 
-    monitor = get_monitors()[0]
+    handle = get_primary_monitor_handle()
 
-    with monitor:
-        while True:
-            try:
-                default_brightness = monitor.get_luminance()
-                default_contrast = monitor.get_contrast()
-                print(f"Default Brightness: {default_brightness}")
-                print(f"Default Contrast: {default_contrast}")
-                print()
-                break
-            except VCPError:
-                continue
+    default_brightness = vcp_get_luminance(handle)
+    default_contrast = vcp_get_contrast(handle)
+    print(f"Default Brightness: {default_brightness}")
+    print(f"Default Contrast: {default_contrast}")
+    print()
 
     # monitor_w = screeninfo.get_monitors()[config.MONITOR_INDEX].width
     # monitor_h = screeninfo.get_monitors()[config.MONITOR_INDEX].height
@@ -330,13 +376,7 @@ if __name__ == "__main__":
     try:
         while True:
             # This is almost 2-3 times faster than sbc.get_brightness()[0]
-            with monitor:
-                while True:
-                    try:
-                        brightness = monitor.get_luminance()
-                        break
-                    except VCPError:
-                        continue
+            brightness = vcp_get_luminance(handle)
 
             frame = camera.get_latest_frame()
 
@@ -405,62 +445,55 @@ if __name__ == "__main__":
                     diff_for_6x_interval = 48
 
                     if change_in_luma == 1:
-                        with monitor:
-                            monitor.set_luminance(luma)
+                        vcp_set_luminance(handle, luma)
                     elif change_in_luma >= diff_for_instant:
                         print(f"Too much change in luminance: {change_in_luma}")
-                        with monitor:
-                            monitor.set_luminance(luma)
+                        vcp_set_luminance(handle, luma)
                     elif change_in_luma > diff_for_2x_interval:
                         print(f"Sudden change in luminance: {change_in_luma}")
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=2,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=2,
+                        )
                     elif change_in_luma > diff_for_3x_interval:
                         print(f"Sudden change in luminance: {change_in_luma}")
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=3,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=3,
+                        )
                     elif change_in_luma > diff_for_4x_interval:
                         print(f"Sudden change in luminance: {change_in_luma}")
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=4,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=4,
+                        )
                     elif change_in_luma > diff_for_5x_interval:
                         print(f"Sudden change in luminance: {change_in_luma}")
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=5,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=5,
+                        )
                     elif change_in_luma > diff_for_6x_interval:
                         print(f"Sudden change in luminance: {change_in_luma}")
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=6,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=6,
+                        )
                     else:
                         diff = (
                             (luma - brightness)
@@ -469,21 +502,19 @@ if __name__ == "__main__":
                         )
                         increment = clamp(diff, 1, 2)
 
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=increment,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=increment,
+                        )
 
                         print(f"Brightness: {luma} (from {brightness})")
                 else:
                     # Normal (non-adaptive increments) brightness adjustments
                     if config.BRIGHTNESS_INSTANT_ADJUSTMENTS:
-                        with monitor:
-                            monitor.set_luminance(luma)
+                        vcp_set_luminance(handle, luma)
                     else:
                         diff = (
                             (luma - brightness)
@@ -492,27 +523,20 @@ if __name__ == "__main__":
                         )
                         increment = clamp(diff, 1, 2)
 
-                        with monitor:
-                            fade_brightness(
-                                monitor=monitor,
-                                finish=luma,
-                                start=brightness,
-                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                increment=increment,
-                            )
+                        fade_brightness(
+                            handle=handle,
+                            finish=luma,
+                            start=brightness,
+                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            increment=increment,
+                        )
 
                     print(f"Brightness: {luma} (from {brightness})")
 
             brightness = luma
 
             if config.EXPERIMENTAL_CONTRAST_ADAPTATION:
-                with monitor:
-                    while True:
-                        try:
-                            contrast = monitor.get_contrast()
-                            break
-                        except VCPError:
-                            continue
+                contrast = vcp_get_contrast(handle)
 
                 # Work in progress
                 # Naive implementation but helps in gradual adjustments of display's luminance
@@ -533,13 +557,12 @@ if __name__ == "__main__":
                     print(" ...Skipping contrast adjustment... ")
                     continue
 
-                with monitor:
-                    fade_contrast(
-                        monitor,
-                        average_contrast,
-                        contrast,
-                        interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
-                    )
+                fade_contrast(
+                    handle,
+                    average_contrast,
+                    contrast,
+                    interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
+                )
 
                 print(f"Contrast: {average_contrast} (from {contrast})")
 
@@ -556,10 +579,9 @@ if __name__ == "__main__":
         print(
             f"[!] Setting to default values(Brightness: {default_brightness}, Contrast:{default_contrast})... \n"
         )
-        monitor = get_monitors()[0]
-        with monitor:
-            monitor.set_luminance(default_brightness)
-            monitor.set_contrast(default_contrast)
+        handle = get_primary_monitor_handle()
+        vcp_set_luminance(handle, default_brightness)
+        vcp_set_contrast(handle, default_contrast)
 
         print("[!] Closing... \n")
 
