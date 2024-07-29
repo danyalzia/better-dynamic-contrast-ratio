@@ -341,9 +341,7 @@ if __name__ == "__main__":
             frame = camera.get_latest_frame()
 
             try:
-                luma = get_average_luminance4(frame)
-
-                luma = round(luma)
+                luma = round(get_average_luminance4(frame))
             except ValueError as e:
                 raise RuntimeError(
                     "[!] Cannot calculate average luminance of the content."
@@ -352,32 +350,24 @@ if __name__ == "__main__":
             # Gamma ramp adjustments need to be done before Brightness adjustments to make the perceived lumniance changes less aggressive
             if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
                 # May need more than just average luma to adjust gamma appropriately
-                # For now, I am certain approximations according to anecdotal experience
+                # For now, I am doing certain approximations based on extremely subjective anecdotal experience
                 adjusted_gamma = (100 - luma) / 82
                 adjusted_gamma = clamp(
                     adjusted_gamma, config.MIN_GAMMA, config.MAX_GAMMA
                 )
 
-                # Skip if adjusted gamma is same as previous gamma
+                change_in_gamma = abs(adjusted_gamma - gamma)
+
                 if (
                     adjusted_gamma != gamma
-                    and not (
-                        config.GAMMA_DIFFERENCE_THRESHOLD != 0.0
-                        and adjusted_gamma > gamma
-                        and (adjusted_gamma - gamma) < config.GAMMA_DIFFERENCE_THRESHOLD
-                    )
-                    and not (
-                        config.GAMMA_DIFFERENCE_THRESHOLD != 0.0
-                        and adjusted_gamma < gamma
-                        and (gamma - adjusted_gamma) < config.GAMMA_DIFFERENCE_THRESHOLD
-                    )
+                    and change_in_gamma >= config.LUMA_DIFFERENCE_THRESHOLD
                 ):
                     fade_gamma(
                         SetDeviceGammaRamp,
                         hdc,
                         default_gamma_ramp,
-                        adjusted_gamma,
-                        gamma,
+                        finish=adjusted_gamma,
+                        start=gamma,
                         interval=0.01,
                         increment=0.01,
                     )
@@ -385,6 +375,9 @@ if __name__ == "__main__":
                     print(f"Gamma: {adjusted_gamma} (from {gamma})")
 
                     gamma = adjusted_gamma
+                else:
+                    # Skip if adjusted gamma is same as previous gamma
+                    print(" ...Skipping gamma adjustment... ")
 
             if config.BRIGHTNESS_ADAPTATION:
                 # Clamp to min/max values
@@ -400,7 +393,7 @@ if __name__ == "__main__":
                     print(" ...Skipping brightness adjustment... ")
                     continue
 
-                if config.EXPERIMENTAL_BRIGHTNESS_ADAPTIVE_INCREMENTS:
+                if config.BRIGHTNESS_ADAPTIVE_INCREMENTS:
                     # Adaptive increments
                     diff_for_instant = 50
 
@@ -469,26 +462,21 @@ if __name__ == "__main__":
                                 increment=6,
                             )
                     else:
-                        # Normal (non-adaptive increments) brightness adjustments
-                        if config.BRIGHTNESS_INSTANT_ADJUSTMENTS:
-                            with monitor:
-                                monitor.set_luminance(luma)
-                        else:
-                            diff = (
-                                (luma - brightness)
-                                if luma > brightness
-                                else (brightness - luma)
-                            )
-                            increment = clamp(diff, 1, 2)
+                        diff = (
+                            (luma - brightness)
+                            if luma > brightness
+                            else (brightness - luma)
+                        )
+                        increment = clamp(diff, 1, 2)
 
-                            with monitor:
-                                fade_brightness(
-                                    monitor=monitor,
-                                    finish=luma,
-                                    start=brightness,
-                                    interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                                    increment=increment,
-                                )
+                        with monitor:
+                            fade_brightness(
+                                monitor=monitor,
+                                finish=luma,
+                                start=brightness,
+                                interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                                increment=increment,
+                            )
 
                         print(f"Brightness: {luma} (from {brightness})")
                 else:
