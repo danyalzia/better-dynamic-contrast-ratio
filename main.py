@@ -24,7 +24,6 @@ import dxcam
 import ctypes
 import math
 
-import threading
 import time
 import numpy as np
 
@@ -34,15 +33,15 @@ import config
 # Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
 try:
     if config.CPU_MODE_FORCED:
-        raise ValueError("[!] CPU mode is forced. Using CPU version... ")
+        raise ValueError("[!] CPU mode is forced. Using CPU version... \n")
 
     try:
         import torch
     except ModuleNotFoundError:
-        raise ModuleNotFoundError("[!] PyTorch not found. Using CPU version... ")
+        raise ModuleNotFoundError("[!] PyTorch not found. Using CPU version... \n")
 
     if not torch.cuda.is_available():
-        raise ValueError("[!] CUDA is not available. Using CPU version... ")
+        raise ValueError("[!] CUDA is not available. Using CPU version... \n")
 
     print("[!] Using PyTorch (CUDA)... \n")
 
@@ -243,7 +242,7 @@ def set_gamma(SetDeviceGammaRamp, hdc, gamma_ramp, value):
         raise ValueError(f"Unable to set Gamma to {value}")
 
 
-def _fade_gamma(
+def fade_gamma(
     SetDeviceGammaRamp,
     hdc,
     gamma_ramp,
@@ -252,7 +251,6 @@ def _fade_gamma(
     interval: float = 0.01,
     increment: float = 0.01,
 ):
-    current_thread = threading.current_thread()
 
     finishInt = round(finish * 100)
     startInt = round(start * 100)
@@ -265,11 +263,7 @@ def _fade_gamma(
 
     for valueInt in range(startInt, finishInt, incrementInt):
 
-        if threading.current_thread() != current_thread:
-            break
-
         value = valueInt / 100
-        # print(f"Setting to {value} from {start / 100} uptil {finish / 100}")
 
         set_gamma(SetDeviceGammaRamp, hdc, gamma_ramp, value)
 
@@ -278,44 +272,13 @@ def _fade_gamma(
 
         if sleep_time > 0:
             time.sleep(sleep_time)
-    else:
-        set_gamma(SetDeviceGammaRamp, hdc, gamma_ramp, finish)
 
-
-def fade_gamma(
-    SetDeviceGammaRamp,
-    hdc,
-    gamma_ramp,
-    finish: float,
-    start: float | None = None,
-    interval: float = 0.01,
-    increment: float = 0.01,
-):
-
-    thread = threading.Thread(
-        target=_fade_gamma,
-        args=(
-            SetDeviceGammaRamp,
-            hdc,
-            gamma_ramp,
-            finish,
-            start,
-            interval,
-            increment,
-        ),
-    )
-    thread.start()
-    threads = [thread]
-
-    for t in threads:
-        t.join()
+    return finish
 
 
 if __name__ == "__main__":
-    threads: list[threading.Thread] = []
     if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
         GetDC = ctypes.windll.user32.GetDC
-        ReleaseDC = ctypes.windll.user32.ReleaseDC
         SetDeviceGammaRamp = ctypes.windll.gdi32.SetDeviceGammaRamp
         GetDeviceGammaRamp = ctypes.windll.gdi32.GetDeviceGammaRamp
 
@@ -334,6 +297,18 @@ if __name__ == "__main__":
         set_gamma(SetDeviceGammaRamp, hdc, default_gamma_ramp, gamma)
 
     monitor = get_monitors()[0]
+
+    with monitor:
+        while True:
+            try:
+                default_brightness = monitor.get_luminance()
+                default_contrast = monitor.get_contrast()
+                print(f"Default Brightness: {default_brightness}")
+                print(f"Default Contrast: {default_contrast}")
+                print()
+                break
+            except VCPError:
+                continue
 
     # monitor_w = screeninfo.get_monitors()[config.MONITOR_INDEX].width
     # monitor_h = screeninfo.get_monitors()[config.MONITOR_INDEX].height
@@ -583,10 +558,21 @@ if __name__ == "__main__":
                 contrast = average_contrast
 
     except KeyboardInterrupt:
-        print("[!] Programm interrupted. Closing now... ")
+        print("\n[!] Program is interrupted.\n")
         del camera
 
-        if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS and not ReleaseDC(hdc):
-            print("[!] Could not release the HDC")
+        if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
+            ReleaseDC = ctypes.windll.user32.ReleaseDC
+            ReleaseDC(hdc)
+
+        print(
+            f"[!] Setting to default values(Brightness: {default_brightness}, Contrast:{default_contrast})... \n"
+        )
+        monitor = get_monitors()[0]
+        with monitor:
+            monitor.set_luminance(default_brightness)
+            monitor.set_contrast(default_contrast)
+
+        print("[!] Closing... \n")
 
         time.sleep(1)
