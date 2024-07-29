@@ -109,7 +109,6 @@ except (ModuleNotFoundError, ValueError) as err:
 def fade_brightness(
     monitor, finish: int, start: int, interval: float, increment: int = 1
 ):
-
     increment = abs(increment)
     if start > finish:
         increment = -increment
@@ -137,7 +136,6 @@ def fade_contrast(
     next_change_start_time = time.time()
 
     for value in range(start, finish, increment):
-
         monitor.set_contrast(value)
 
         next_change_start_time += interval
@@ -146,9 +144,7 @@ def fade_contrast(
         if sleep_time > 0:
             time.sleep(sleep_time)
 
-
-def set_contrast(monitor, value: int):
-    monitor.set_contrast(value)
+    return finish
 
 
 def clamp(d, minValue, maxValue):
@@ -383,7 +379,9 @@ if __name__ == "__main__":
                 # May need more than just average luma to adjust gamma appropriately
                 # For now, I am certain approximations according to anecdotal experience
                 adjusted_gamma = (100 - luma) / 82
-                adjusted_gamma = clamp(adjusted_gamma, config.MIN_GAMMA, config.MAX_GAMMA)
+                adjusted_gamma = clamp(
+                    adjusted_gamma, config.MIN_GAMMA, config.MAX_GAMMA
+                )
 
                 # Skip if adjusted gamma is same as previous gamma
                 if (
@@ -418,9 +416,12 @@ if __name__ == "__main__":
                 luma = clamp(luma, config.MIN_BRIGHTNESS, config.MAX_BRIGHTNESS)
 
                 change_in_luma = abs(luma - brightness)
-                
+
                 # Skip if the luma is same as current monitor's brightness
-                if luma == brightness or change_in_luma <= config.LUMA_DIFFERENCE_THRESHOLD:
+                if (
+                    luma == brightness
+                    or change_in_luma <= config.LUMA_DIFFERENCE_THRESHOLD
+                ):
                     print(" ...Skipping brightness adjustment... ")
                     continue
 
@@ -542,13 +543,13 @@ if __name__ == "__main__":
             brightness = luma
 
             if config.EXPERIMENTAL_CONTRAST_ADAPTATION:
-                while True:
-                    try:
-                        with monitor:
+                with monitor:
+                    while True:
+                        try:
                             contrast = monitor.get_contrast()
                             break
-                    except Exception:
-                        continue
+                        except VCPError:
+                            continue
 
                 # Work in progress
                 # Naive implementation but helps in gradual adjustments of display's luminance
@@ -556,57 +557,31 @@ if __name__ == "__main__":
                 # Blacks are not improved though in very low lumninance content
                 average_contrast = 100 - luma
 
-                if average_contrast == contrast:
+                # Clamp to min/max values
+                average_contrast = clamp(luma, config.MIN_CONTRAST, config.MAX_CONTRAST)
+
+                change_in_contrast = abs(average_contrast - contrast)
+
+                # Skip if the average contrast is same as current monitor's contrast
+                if (
+                    average_contrast == contrast
+                    or change_in_contrast <= config.CONTRAST_DIFFERENCE_THRESHOLD
+                ):
+                    print(" ...Skipping contrast adjustment... ")
                     continue
 
-                if config.CONTRAST_DIFFERENCE_THRESHOLD != 0:
-                    if (
-                        average_contrast > contrast
-                        and (average_contrast - contrast)
-                        < config.CONTRAST_DIFFERENCE_THRESHOLD
-                    ):
-                        continue
-
-                    if (
-                        average_contrast < contrast
-                        and (contrast - average_contrast)
-                        < config.CONTRAST_DIFFERENCE_THRESHOLD
-                    ):
-                        continue
-
-                if average_contrast < config.MIN_CONTRAST:
-                    fade_contrast(
-                        monitor,
-                        config.MIN_CONTRAST,
-                        contrast,
-                        interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
-                    )
-                    print(
-                        f"Contrast: {average_contrast}. Clamping to min contrast: {config.MIN_CONTRAST}"
-                    )
-                    contrast = average_contrast
-
-                elif average_contrast > config.MAX_CONTRAST:
-                    fade_contrast(
-                        monitor,
-                        config.MAX_CONTRAST,
-                        contrast,
-                        interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
-                    )
-                    print(
-                        f"Contrast: {average_contrast}. Clamping to max contrast: {config.MAX_CONTRAST}"
-                    )
-                    contrast = average_contrast
-
-                elif luma <= config.MAX_CONTRAST:
+                with monitor:
                     fade_contrast(
                         monitor,
                         average_contrast,
                         contrast,
                         interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
                     )
-                    print(f"Contrast: {average_contrast} (from {contrast})")
-                    contrast = average_contrast
+
+                print(f"Contrast: {average_contrast} (from {contrast})")
+
+                contrast = average_contrast
+
     except KeyboardInterrupt:
         print("[!] Programm interrupted. Closing now... ")
         del camera
