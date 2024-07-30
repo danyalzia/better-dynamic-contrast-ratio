@@ -19,15 +19,15 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+from functools import cache
 import os
 import dxcam
-import ctypes
 import math
 
 import time
 import numpy as np
-import ctypes
-from ctypes.wintypes import DWORD, HANDLE, BYTE, WCHAR
+from ctypes import Structure, windll, byref
+from ctypes.wintypes import DWORD, HANDLE, BYTE, WCHAR, HDC
 
 import config
 
@@ -81,6 +81,15 @@ try:
 except (ModuleNotFoundError, ValueError) as err:
     print(err)
 
+    @cache
+    def lum_to_0_100(luminance: float):
+        return (luminance / 255) * 100
+
+    @cache
+    def sum_to_0_100(summed: float, x: int, y: int):
+        luminance = summed / (x * y)
+        return (luminance / 255) * 100
+
     def get_average_luminance1(arr: np.ndarray):
         total_num_sum = np.prod(arr.shape[:-1])
         luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
@@ -90,70 +99,47 @@ except (ModuleNotFoundError, ValueError) as err:
     def get_average_luminance2(arr: np.ndarray):
         mean_rgb = arr.reshape(-1, 3).mean(axis=0)
         luminance = (mean_rgb * [0.2126, 0.7152, 0.0722]).sum()
-        return (luminance / 255) * 100
+        return lum_to_0_100(luminance)
 
     # ITU BT.601
     def get_average_luminance3(arr: np.ndarray):
         mean_rgb = arr.reshape(-1, 3).mean(axis=0)
         luminance = (mean_rgb * [0.299, 0.587, 0.114]).sum()
-        return (luminance / 255) * 100
+        return lum_to_0_100(luminance)
 
     # Fastest method when the source is grayscale
     # Will not work in RGB mode
     def get_average_luminance4(arr: np.ndarray):
-        l = arr.shape[0] * arr.shape[1]
-        luminance = arr.sum() / l
-        return (luminance / 255) * 100
+        return sum_to_0_100(arr.sum(), arr.shape[0], arr.shape[1])
 
 
-class PhysicalMonitor(ctypes.Structure):
+class PhysicalMonitor(Structure):
     _fields_ = [("handle", HANDLE), ("description", WCHAR * 128)]
 
 
 def get_primary_monitor_handle():
-    monitor_HMONITOR = ctypes.windll.user32.MonitorFromPoint(0, 0, 1)
+    monitor_HMONITOR = windll.user32.MonitorFromPoint(0, 0, 1)
     physical_monitors = (PhysicalMonitor * 1)()
 
-    ctypes.windll.dxva2.GetPhysicalMonitorsFromHMONITOR(
-        monitor_HMONITOR, 1, physical_monitors
-    )
+    windll.dxva2.GetPhysicalMonitorsFromHMONITOR(monitor_HMONITOR, 1, physical_monitors)
 
     return physical_monitors[0].handle
 
 
 def vcp_set_luminance(handle, value):
-    ctypes.windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x10), DWORD(value))
+    windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x10), DWORD(value))
 
 
 def vcp_get_luminance(handle):
     feature_current = DWORD()
     feature_max = DWORD()
 
-    ctypes.windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
+    windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
         HANDLE(handle),
         BYTE(0x10),
         None,
-        ctypes.byref(feature_current),
-        ctypes.byref(feature_max),
-    )
-
-    return feature_current.value
-
-
-def vcp_set_contrast(handle, value):
-    ctypes.windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x12), DWORD(value))
-
-
-def vcp_get_contrast(handle):
-    feature_current = DWORD()
-    feature_max = DWORD()
-
-    ctypes.windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
-        HANDLE(handle),
-        BYTE(0x12),
-        None,
-        ctypes.byref(feature_current),
-        ctypes.byref(feature_max),
+        byref(feature_current),
+        byref(feature_max),
     )
 
     return feature_current.value
@@ -179,94 +165,9 @@ def fade_brightness(
     return finish
 
 
-def fade_contrast(handle, finish: int, start: int, interval: float, increment: int = 1):
-    increment = abs(increment)
-    if start > finish:
-        increment = -increment
-
-    next_change_start_time = time.time()
-
-    for value in range(start, finish, increment):
-        vcp_set_contrast(handle, value)
-
-        next_change_start_time += interval
-        sleep_time = next_change_start_time - time.time()
-
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-
-    return finish
-
-
 def clamp(d, minValue, maxValue):
     t = max(d, minValue)
     return min(t, maxValue)
-
-
-def change_gamma_values(
-    rGamma, gGamma, bGamma, rContrast, gContrast, bContrast, rBright, gBright, bBright
-):
-
-    MaxGamma = 4.4
-    MinGamma = 0.3
-    rGamma = clamp(rGamma, MinGamma, MaxGamma)
-    gGamma = clamp(gGamma, MinGamma, MaxGamma)
-    bGamma = clamp(bGamma, MinGamma, MaxGamma)
-
-    print(rGamma, gGamma, bGamma)
-
-    MaxContrast = 100.0
-    MinContrast = 0.1
-    rContrast = clamp(rContrast, MinContrast, MaxContrast)
-    gContrast = clamp(gContrast, MinContrast, MaxContrast)
-    bContrast = clamp(bContrast, MinContrast, MaxContrast)
-
-    print(rContrast, gContrast, bContrast)
-
-    MaxBright = 1.0
-    MinBright = -1.0
-    rBright = clamp(rBright, MinBright, MaxBright)
-    gBright = clamp(gBright, MinBright, MaxBright)
-    bBright = clamp(bBright, MinBright, MaxBright)
-
-    print(rBright, gBright, bBright)
-
-    rInvgamma = 1 / rGamma
-    gInvgamma = 1 / gGamma
-    bInvgamma = 1 / bGamma
-    rNorm = math.pow(255.0, rInvgamma - 1)
-    gNorm = math.pow(255.0, gInvgamma - 1)
-    bNorm = math.pow(255.0, bInvgamma - 1)
-
-    print(rInvgamma, gInvgamma, bInvgamma)
-    print(rNorm, gNorm, bNorm)
-
-    newGamma = np.empty((3, 256), dtype=np.uint16)  # init R, G, and B ramps
-
-    for i in range(256):
-        rVal = i * rContrast - (rContrast - 1) * 127
-        gVal = i * gContrast - (gContrast - 1) * 127
-        bVal = i * bContrast - (bContrast - 1) * 127
-
-        if rGamma != 1:
-            rVal = math.pow(rVal, rInvgamma) / rNorm
-        if gGamma != 1:
-            gVal = math.pow(gVal, gInvgamma) / gNorm
-        if bGamma != 1:
-            bVal = math.pow(bVal, bInvgamma) / bNorm
-
-        rVal += rBright * 128
-        gVal += gBright * 128
-        bVal += bBright * 128
-
-        newGamma[0][i] = clamp((int)(rVal * 256), 0, 65535)
-        # r
-        newGamma[1][i] = clamp((int)(gVal * 256), 0, 65535)
-        # g
-        newGamma[2][i] = clamp((int)(bVal * 256), 0, 65535)
-        # b
-
-    return newGamma
 
 
 def get_default_gamma_ramp(GetDeviceGammaRamp, hdc):
@@ -285,13 +186,32 @@ def load_gamma_ramp(filename):
     return np.load(filename)
 
 
-# value range: 0.7 - 1.1
+def get_gamma_allowed_values(SetDeviceGammaRamp, hdc, gamma_ramp):
+    supported_values = []
+
+    # Check 0.5 - 1.5 range
+    for value in range(50, 150 + 1):
+        value = value / 100
+
+        Scale = np.array([[value], [value], [value]], float)
+        NewRamps = np.uint16(np.round(np.multiply(Scale, gamma_ramp)))
+
+        if not SetDeviceGammaRamp(hdc, NewRamps.ctypes):  # 0-1 = False/True
+            value += 0.01
+        else:
+            supported_values.append(value)
+
+    print(f"Supported Gamma Values:\n{','.join(str(v) for v in supported_values)}\n")
+
+    return supported_values
+
+
 def set_gamma(SetDeviceGammaRamp, hdc, gamma_ramp, value):
     Scale = np.array([[value], [value], [value]], float)
     NewRamps = np.uint16(np.round(np.multiply(Scale, gamma_ramp)))
 
-    if not SetDeviceGammaRamp(hdc, NewRamps.ctypes):
-        raise ValueError(f"Unable to set Gamma to {value}")
+    if not SetDeviceGammaRamp(hdc, NewRamps.ctypes):  # 0-1 = False/True
+        ValueError(f"Unable to set Gamma to {value}")
 
 
 def fade_gamma(
@@ -303,7 +223,6 @@ def fade_gamma(
     interval: float = 0.01,
     increment: float = 0.01,
 ):
-
     finishInt = round(finish * 100)
     startInt = round(start * 100)
     incrementInt = round(abs(increment * 100))
@@ -328,13 +247,18 @@ def fade_gamma(
     return finish
 
 
-if __name__ == "__main__":
-    if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
-        GetDC = ctypes.windll.user32.GetDC
-        SetDeviceGammaRamp = ctypes.windll.gdi32.SetDeviceGammaRamp
-        GetDeviceGammaRamp = ctypes.windll.gdi32.GetDeviceGammaRamp
+@cache
+def get_adjusted_gamma(log_mid_point: float, mean_luma: float):
+    return log_mid_point / math.log(mean_luma)
 
-        hdc = ctypes.wintypes.HDC(GetDC(None))
+
+if __name__ == "__main__":
+    if config.GAMMA_RAMP_ADJUSTMENTS:
+        GetDC = windll.user32.GetDC
+        SetDeviceGammaRamp = windll.gdi32.SetDeviceGammaRamp
+        GetDeviceGammaRamp = windll.gdi32.GetDeviceGammaRamp
+
+        hdc = HDC(GetDC(None))
         if not hdc:
             raise RuntimeError("No HDC")
 
@@ -344,16 +268,35 @@ if __name__ == "__main__":
             default_gamma_ramp = get_default_gamma_ramp(GetDeviceGammaRamp, hdc)
             save_gamma_ramp(default_gamma_ramp, "defaultgamma")
 
-        # Start with a bit darkened image
-        gamma = 0.90
+        supported_values = get_gamma_allowed_values(
+            SetDeviceGammaRamp, hdc, default_gamma_ramp
+        )
+        min_gamma_allowed, max_gamma_allowed = min(supported_values), max(
+            supported_values
+        )
+
+        # Closer to 0 means bias towards blacks/shadows, so on average darker screen but also less blown out highlights
+        # If the content consistently looks too dark, increaes it slowly by +0.01 till the right balance is found
+        mid_point = 0.12
+        log_mid_point = math.log(mid_point * 255)
+
+        print(f"Min Gamma Allowed: {min_gamma_allowed}")
+        print(f"Max Gamma Allowed: {max_gamma_allowed}")
+        print(f"Mid Point: {mid_point}")
+        print(f"Log Mid Point: {log_mid_point}")
+        print()
+
+        # Start with a darkened image
+        gamma = min_gamma_allowed
         set_gamma(SetDeviceGammaRamp, hdc, default_gamma_ramp, gamma)
+
+        # Ignore annoying divide by zero and overflow warnings
+        np.seterr(divide="ignore", over="ignore")
 
     handle = get_primary_monitor_handle()
 
     default_brightness = vcp_get_luminance(handle)
-    default_contrast = vcp_get_contrast(handle)
     print(f"Default Brightness: {default_brightness}")
-    print(f"Default Contrast: {default_contrast}")
     print()
 
     # monitor_w = screeninfo.get_monitors()[config.MONITOR_INDEX].width
@@ -380,46 +323,84 @@ if __name__ == "__main__":
 
             frame = camera.get_latest_frame()
 
-            try:
-                luma = round(get_average_luminance4(frame))
-            except ValueError as e:
-                raise RuntimeError(
-                    "[!] Cannot calculate average luminance of the content."
-                ) from e
-
             # Gamma ramp adjustments need to be done before Brightness adjustments to make the perceived lumniance changes less aggressive
-            if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
-                # May need more than just average luma to adjust gamma appropriately
-                # For now, I am doing certain approximations based on extremely subjective anecdotal experience
-                adjusted_gamma = (100 - luma) / 82
+            if config.GAMMA_RAMP_ADJUSTMENTS:
+                # This method requires frame to be in grayscale (which we already have)
+                try:
+                    mean_luma = get_average_luminance4(frame)
+                except ValueError as e:
+                    raise RuntimeError(
+                        "[!] Cannot calculate average luminance of the content."
+                    ) from e
+
+                # All pixels are black (i.e., value of 0)
+                # e.g., Black fullscreen wallpaper
+                if mean_luma == 0:
+                    adjusted_gamma = max_gamma_allowed
+                # All pixels are black (i.e., value of 255)
+                # e.g., White fullscreen wallpaper
+                elif mean_luma == 255:
+                    adjusted_gamma = min_gamma_allowed
+                else:
+                    adjusted_gamma = get_adjusted_gamma(log_mid_point, mean_luma)
+
+                # Gamma correction is applied to frame now
+                frame = np.power(frame, adjusted_gamma).clip(0, 255).astype(np.uint8)
+
+                adjusted_gamma = round(adjusted_gamma, 2)
                 adjusted_gamma = clamp(
-                    adjusted_gamma, config.MIN_GAMMA, config.MAX_GAMMA
+                    adjusted_gamma, min_gamma_allowed, max_gamma_allowed
                 )
 
-                change_in_gamma = abs(adjusted_gamma - gamma)
+                change_in_gamma = round(abs(adjusted_gamma - gamma), 2)
 
                 if (
                     adjusted_gamma != gamma
-                    and change_in_gamma >= config.LUMA_DIFFERENCE_THRESHOLD
+                    and change_in_gamma >= config.GAMMA_DIFFERENCE_THRESHOLD
                 ):
-                    fade_gamma(
-                        SetDeviceGammaRamp,
-                        hdc,
-                        default_gamma_ramp,
-                        finish=adjusted_gamma,
-                        start=gamma,
-                        interval=0.01,
-                        increment=0.01,
-                    )
+                    if change_in_gamma == 0.01:
+                        set_gamma(
+                            SetDeviceGammaRamp, hdc, default_gamma_ramp, adjusted_gamma
+                        )
+                    elif change_in_gamma >= 0.10 and change_in_gamma <= 0.10:
+                        fade_gamma(
+                            SetDeviceGammaRamp,
+                            hdc,
+                            default_gamma_ramp,
+                            finish=adjusted_gamma,
+                            start=gamma,
+                            interval=0.01,
+                            increment=0.02,
+                        )
+                    else:
+                        fade_gamma(
+                            SetDeviceGammaRamp,
+                            hdc,
+                            default_gamma_ramp,
+                            finish=adjusted_gamma,
+                            start=gamma,
+                            interval=0.01,
+                            increment=0.01,
+                        )
 
                     print(f"Gamma: {adjusted_gamma} (from {gamma})")
 
                     gamma = adjusted_gamma
-                else:
-                    # Skip if adjusted gamma is same as previous gamma
-                    print(" ...Skipping gamma adjustment... ")
 
             if config.BRIGHTNESS_ADAPTATION:
+                try:
+                    mean_luma = get_average_luminance4(frame)
+                    luma = round(mean_luma)
+                except ValueError as e:
+                    raise RuntimeError(
+                        "[!] Cannot calculate average luminance of the content."
+                    ) from e
+
+                if config.GAMMA_RAMP_ADJUSTMENTS:
+                    # Small exposure bias if gamma has been adjusted to increase dynamic brightness range
+                    luma *= 1.2
+                    luma = round(luma)
+
                 # Clamp to min/max values
                 luma = clamp(luma, config.MIN_BRIGHTNESS, config.MAX_BRIGHTNESS)
 
@@ -430,10 +411,11 @@ if __name__ == "__main__":
                     luma == brightness
                     or change_in_luma <= config.LUMA_DIFFERENCE_THRESHOLD
                 ):
-                    print(" ...Skipping brightness adjustment... ")
                     continue
 
-                if config.BRIGHTNESS_ADAPTIVE_INCREMENTS:
+                if config.BRIGHTNESS_INSTANT_ADJUSTMENTS:
+                    vcp_set_luminance(handle, luma)
+                else:
                     # Adaptive increments
                     diff_for_instant = 50
 
@@ -455,7 +437,7 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.1,
                             increment=2,
                         )
                     elif change_in_luma > diff_for_3x_interval:
@@ -464,7 +446,7 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.1,
                             increment=3,
                         )
                     elif change_in_luma > diff_for_4x_interval:
@@ -473,7 +455,7 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.1,
                             increment=4,
                         )
                     elif change_in_luma > diff_for_5x_interval:
@@ -482,7 +464,7 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.1,
                             increment=5,
                         )
                     elif change_in_luma > diff_for_6x_interval:
@@ -491,7 +473,7 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.0,
                             increment=6,
                         )
                     else:
@@ -506,83 +488,35 @@ if __name__ == "__main__":
                             handle=handle,
                             finish=luma,
                             start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
+                            interval=0.1,
                             increment=increment,
                         )
 
-                        print(f"Brightness: {luma} (from {brightness})")
-                else:
-                    # Normal (non-adaptive increments) brightness adjustments
-                    if config.BRIGHTNESS_INSTANT_ADJUSTMENTS:
-                        vcp_set_luminance(handle, luma)
-                    else:
-                        diff = (
-                            (luma - brightness)
-                            if luma > brightness
-                            else (brightness - luma)
-                        )
-                        increment = clamp(diff, 1, 2)
+                print(f"Brightness: {luma} (from {brightness})")
 
-                        fade_brightness(
-                            handle=handle,
-                            finish=luma,
-                            start=brightness,
-                            interval=config.BRIGHTNESS_ADJUSTMENT_INTERVAL,
-                            increment=increment,
-                        )
-
-                    print(f"Brightness: {luma} (from {brightness})")
-
-            brightness = luma
-
-            if config.EXPERIMENTAL_CONTRAST_ADAPTATION:
-                contrast = vcp_get_contrast(handle)
-
-                # Work in progress
-                # Naive implementation but helps in gradual adjustments of display's luminance
-                # It also leads to less washed out (relaxing) colors in high luminance content
-                # Blacks are not improved though in very low lumninance content
-                average_contrast = 100 - luma
-
-                # Clamp to min/max values
-                average_contrast = clamp(luma, config.MIN_CONTRAST, config.MAX_CONTRAST)
-
-                change_in_contrast = abs(average_contrast - contrast)
-
-                # Skip if the average contrast is same as current monitor's contrast
-                if (
-                    average_contrast == contrast
-                    or change_in_contrast <= config.CONTRAST_DIFFERENCE_THRESHOLD
-                ):
-                    print(" ...Skipping contrast adjustment... ")
-                    continue
-
-                fade_contrast(
-                    handle,
-                    average_contrast,
-                    contrast,
-                    interval=config.CONTRAST_ADJUSTMENT_INTERVAL,
-                )
-
-                print(f"Contrast: {average_contrast} (from {contrast})")
-
-                contrast = average_contrast
+                brightness = luma
 
     except KeyboardInterrupt:
         print("\n[!] Program is interrupted.\n")
         del camera
 
-        if config.EXPERIMENTAL_GAMMA_RAMP_ADJUSTMENTS:
-            ReleaseDC = ctypes.windll.user32.ReleaseDC
+        if config.GAMMA_RAMP_ADJUSTMENTS:
+            ReleaseDC = windll.user32.ReleaseDC
             ReleaseDC(hdc)
 
-        print(
-            f"[!] Setting to default values(Brightness: {default_brightness}, Contrast:{default_contrast})... \n"
-        )
+        print("[!] Setting to default values... \n")
+
+        # Gamma
+        if config.GAMMA_RAMP_ADJUSTMENTS:
+            default_gamma_ramp = load_gamma_ramp("defaultgamma.npy")
+            set_gamma(SetDeviceGammaRamp, hdc, default_gamma_ramp, 1.0)
+
+        # Brightness
         handle = get_primary_monitor_handle()
         vcp_set_luminance(handle, default_brightness)
-        vcp_set_contrast(handle, default_contrast)
 
         print("[!] Closing... \n")
+
+        time.sleep(1)
 
         time.sleep(1)

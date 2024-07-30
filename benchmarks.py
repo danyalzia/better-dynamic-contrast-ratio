@@ -97,20 +97,26 @@ def average_luminance():
     camera.start(target_fps=60)
     frame = camera.get_latest_frame()
 
+    samples = 120
+
     current_time = time.time()
-    luma = get_average_luminance1(frame)
+    for _ in range(samples):
+        luma = get_average_luminance1(frame)
     print(f"Luma1: {luma} ------------- took {time.time() - current_time} seconds")
 
     current_time = time.time()
-    luma = get_average_luminance2(frame)
+    for _ in range(samples):
+        luma = get_average_luminance2(frame)
     print(f"Luma2: {luma} ------------- took {time.time() - current_time} seconds")
 
     current_time = time.time()
-    luma = get_average_luminance3(frame)
+    for _ in range(samples):
+        luma = get_average_luminance3(frame)
     print(f"Luma3: {luma} ------------- took {time.time() - current_time} seconds")
 
     current_time = time.time()
-    luma = get_average_luminance4(frame)
+    for _ in range(samples):
+        luma = get_average_luminance4(frame)
     print(f"Luma4: {luma} ------------- took {time.time() - current_time} seconds")
 
     del camera
@@ -185,4 +191,4 @@ def set_brightness():
 
 if __name__ == "__main__":
     average_luminance()
-    set_brightness()
+    # set_brightness()
