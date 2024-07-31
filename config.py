@@ -38,19 +38,30 @@ TARGET_FPS = 60
 # Forcing CPU for now because CPU (numpy based) luminance calculating algorithms are actually faster due to PyTorch/CUDA overhead
 CPU_MODE_FORCED = True
 
-# --------------
-# -- Brightness
-# --------------
+# ------------------------------------
+# -- Monitor's Luminance (Brightness)
+# ------------------------------------
 
-BRIGHTNESS_ADAPTATION = True
-BRIGHTNESS_INSTANT_ADJUSTMENTS = False
-LUMA_DIFFERENCE_THRESHOLD = 0.0  # Tolerance level
-MIN_BRIGHTNESS = 0
-MAX_BRIGHTNESS = 100
+MONITOR_LUMINANCE_ADJUSTMENTS = True
+MONITOR_LUMINANCE_INSTANT_ADJUSTMENTS = False
+
+MIN_MONITOR_LUMINANCE = 0  # Monitor's Brightness will never be set below this value
+MAX_MONITOR_LUMINANCE = 100  # Monitor's Brightness will never be set above this value
 
 # ---------
 # -- Gamma
 # ---------
 
 GAMMA_RAMP_ADJUSTMENTS = True
+
+# --------
+# -- Misc
+# --------
+LUMA_DIFFERENCE_THRESHOLD = 0.0  # Tolerance level
 GAMMA_DIFFERENCE_THRESHOLD = 0.0  # Tolerance level
+
+# Bias towards blacks/whites
+# Negative value means bias towards blacks/shadows, so on average darker screen but less blown out highlights
+# Positive value means bias towards blacks/shadows, so on average lighter screen but also less crushed blacks
+# Increaes or decrease it slowly by 0.01 till the right balance is found
+MID_POINT_BIAS = 0.0
