@@ -201,8 +201,6 @@ def get_gamma_allowed_values(SetDeviceGammaRamp, hdc, gamma_ramp):
         else:
             supported_values.append(value)
 
-    print(f"Supported Gamma Values:\n{','.join(str(v) for v in supported_values)}\n")
-
     return supported_values
 
 
@@ -341,10 +339,32 @@ if __name__ == "__main__":
 
         log_mid_point = math.log(mid_point * 255)
 
+        luminance_map = {
+            y: int(x)
+            for x, y in zip(
+                scale_list(
+                    list(range(101)),
+                    config.MIN_DESIRED_MONITOR_LUMINANCE,
+                    config.MAX_DESIRED_MONITOR_LUMINANCE,
+                ),
+                list(range(101)),
+            )
+        }
+
+        print(f"Supported Gamma Values: {','.join(str(v) for v in supported_values)}")
         print(f"Min Gamma Allowed: {min_gamma_allowed}")
         print(f"Max Gamma Allowed: {max_gamma_allowed}")
         print(f"Mid Point: {mid_point}")
         print(f"Log Mid Point: {log_mid_point}")
+        print(
+            f"Min Monitor's Desired Luminance: {config.MIN_DESIRED_MONITOR_LUMINANCE}"
+        )
+        print(
+            f"Max Monitor's Desired Luminance: {config.MAX_DESIRED_MONITOR_LUMINANCE}"
+        )
+        print(
+            f"Monitor's Luminance Values: {','.join(str(v) for v in luminance_map.values())}\n"
+        )
         print()
 
         # Start with a darkened image
@@ -359,14 +379,6 @@ if __name__ == "__main__":
     default_monitor_luminance = vcp_get_luminance(handle)
     print(f"Default Monitor's Luminance: {default_monitor_luminance}")
     print()
-
-    # monitor_w = screeninfo.get_monitors()[config.MONITOR_INDEX].width
-    # monitor_h = screeninfo.get_monitors()[config.MONITOR_INDEX].height
-    # region_size = 100
-    # # Take the center of the screen
-    # left, top = (monitor_w - region_size) // 2, (monitor_h - region_size) // 2
-    # right, bottom = left + region_size, top + region_size
-    # region = (left, top, right, bottom)
 
     try:
         camera = dxcam.create(output_idx=config.MONITOR_INDEX, output_color="GRAY")
@@ -413,21 +425,18 @@ if __name__ == "__main__":
                 if config.MONITOR_LUMINANCE_ADJUSTMENTS:
                     mean_luma = get_average_luminance4(frame)
 
+                    # Using gamma correction information to decide the levels of monitor's luminance
+                    # Increase monitor's luminance when gamma is lower than half of gamma to compensate the lower perceived luminance for the darker colors
                     if adjusted_gamma < (mid_point * 10):
                         mean_luma = 100 - mean_luma
                         # Small exposure bias when gamma (i.e., content luminance) has been adjusted to increase the perceived dynamic range
                         mean_luma = mean_luma * 1.15
+                    # Do the opposite for brighter/washed out colors
                     else:
                         mean_luma = mean_luma * 0.85
 
                     mean_luma = round(mean_luma)
-
-                    # Clamp to min/max values
-                    mean_luma = clamp(
-                        mean_luma,
-                        config.MIN_MONITOR_LUMINANCE,
-                        config.MAX_MONITOR_LUMINANCE,
-                    )
+                    adjusted_monitor_luminance = luminance_map[mean_luma]
 
                 adjusted_gamma = round(adjusted_gamma, 2)
                 adjusted_gamma = clamp(
@@ -448,7 +457,7 @@ if __name__ == "__main__":
                                 default_gamma_ramp,
                                 adjusted_gamma,
                             )
-                            vcp_set_luminance(handle, mean_luma)
+                            vcp_set_luminance(handle, adjusted_monitor_luminance)
                         else:
                             set_gamma(
                                 SetDeviceGammaRamp,
@@ -468,7 +477,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.02,
@@ -495,7 +504,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.03,
@@ -521,7 +530,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.04,
@@ -547,7 +556,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.05,
@@ -573,7 +582,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.06,
@@ -598,7 +607,7 @@ if __name__ == "__main__":
                                 mid_point,
                                 gammaFinish=adjusted_gamma,
                                 gammaStart=gamma,
-                                luminanceFinish=mean_luma,
+                                luminanceFinish=adjusted_monitor_luminance,
                                 luminanceStart=monitor_luminance,
                                 interval=0.01,
                                 increment=0.01,
@@ -620,7 +629,7 @@ if __name__ == "__main__":
                     gamma = adjusted_gamma
 
                     if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                        print(f"Luminance: {mean_luma} (from {monitor_luminance})")
+                        print(f"Luminance: {adjusted_monitor_luminance} (from {monitor_luminance})")
                         monitor_luminance = vcp_get_luminance(handle)
 
             meta_info = ""
@@ -630,24 +639,19 @@ if __name__ == "__main__":
                 and not config.GAMMA_RAMP_ADJUSTMENTS
             ):
                 mean_luma = round(mean_luma)
-                # Clamp to min/max values
-                mean_luma = clamp(
-                    mean_luma,
-                    config.MIN_MONITOR_LUMINANCE,
-                    config.MAX_MONITOR_LUMINANCE,
-                )
+                adjusted_monitor_luminance = luminance_map[mean_luma]
 
-                change_in_luma = abs(mean_luma - monitor_luminance)
+                change_in_luma = abs(adjusted_monitor_luminance - monitor_luminance)
 
-                # Skip if the mean_luma is same as current monitor's luminance
+                # Skip if the adjusted luminance is same as current monitor's luminance
                 if (
-                    mean_luma == monitor_luminance
+                    adjusted_monitor_luminance == monitor_luminance
                     or change_in_luma <= config.LUMA_DIFFERENCE_THRESHOLD
                 ):
                     continue
 
                 if config.MONITOR_LUMINANCE_INSTANT_ADJUSTMENTS:
-                    vcp_set_luminance(handle, mean_luma)
+                    vcp_set_luminance(handle, adjusted_monitor_luminance)
                 else:
                     # Adaptive increments
                     diff_for_instant = 50
@@ -660,15 +664,15 @@ if __name__ == "__main__":
                     diff_for_6x_interval = 48
 
                     if change_in_luma == 1:
-                        vcp_set_luminance(handle, mean_luma)
+                        vcp_set_luminance(handle, adjusted_monitor_luminance)
                     elif change_in_luma >= diff_for_instant:
                         meta_info = f"Sudden change in luminance: {change_in_luma} (Note: It must be avoided)"
-                        vcp_set_luminance(handle, mean_luma)
+                        vcp_set_luminance(handle, adjusted_monitor_luminance)
                     elif change_in_luma > diff_for_2x_interval:
                         meta_info = f"Minor change in luminance: {change_in_luma}"
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.1,
                             increment=2,
@@ -677,7 +681,7 @@ if __name__ == "__main__":
                         meta_info = f"Moderate change in luminance: {change_in_luma}"
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.1,
                             increment=3,
@@ -686,7 +690,7 @@ if __name__ == "__main__":
                         meta_info = f"Large change in luminance: {change_in_luma}"
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.1,
                             increment=4,
@@ -695,7 +699,7 @@ if __name__ == "__main__":
                         meta_info = f"Very large change in luminance: {change_in_luma} (Note: It can be avoided)"
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.1,
                             increment=5,
@@ -704,29 +708,29 @@ if __name__ == "__main__":
                         meta_info = f"Huge change in luminance: {change_in_luma} (Note: It must be avoided)"
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.0,
                             increment=6,
                         )
                     else:
                         diff = (
-                            (mean_luma - monitor_luminance)
-                            if mean_luma > monitor_luminance
-                            else (monitor_luminance - mean_luma)
+                            (adjusted_monitor_luminance - monitor_luminance)
+                            if adjusted_monitor_luminance > monitor_luminance
+                            else (monitor_luminance - adjusted_monitor_luminance)
                         )
                         increment = clamp(diff, 1, 2)
 
                         fade_luminance(
                             handle=handle,
-                            finish=mean_luma,
+                            finish=adjusted_monitor_luminance,
                             start=monitor_luminance,
                             interval=0.1,
                             increment=increment,
                         )
 
                 print(
-                    f"Luminance: {mean_luma} (from {monitor_luminance}) {f'[-- {meta_info} --]' if meta_info else ''}"
+                    f"Luminance: {adjusted_monitor_luminance} (from {monitor_luminance}) {f'[-- {meta_info} --]' if meta_info else ''}"
                 )
                 monitor_luminance = vcp_get_luminance(handle)
 

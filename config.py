@@ -45,8 +45,10 @@ CPU_MODE_FORCED = True
 MONITOR_LUMINANCE_ADJUSTMENTS = True
 MONITOR_LUMINANCE_INSTANT_ADJUSTMENTS = False
 
-MIN_MONITOR_LUMINANCE = 0  # Monitor's Brightness will never be set below this value
-MAX_MONITOR_LUMINANCE = 100  # Monitor's Brightness will never be set above this value
+# Monitor's Brightness range (0 - 100) will be scaled to this range
+# Shorter ranges provide better luminance stability but dramatic shifts
+MIN_DESIRED_MONITOR_LUMINANCE = 10
+MAX_DESIRED_MONITOR_LUMINANCE = 50
 
 # ---------
 # -- Gamma
@@ -58,7 +60,7 @@ GAMMA_RAMP_ADJUSTMENTS = True
 # -- Misc
 # --------
 LUMA_DIFFERENCE_THRESHOLD = 0.0  # Tolerance level
-GAMMA_DIFFERENCE_THRESHOLD = 0.0  # Tolerance level
+GAMMA_DIFFERENCE_THRESHOLD = 0.00  # Tolerance level
 
 # Bias towards blacks/whites
 # Negative value means bias towards blacks/shadows, so on average darker screen but less blown out highlights
