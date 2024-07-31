@@ -55,6 +55,9 @@ MAX_DESIRED_MONITOR_LUMINANCE = 50
 # ---------
 
 GAMMA_RAMP_ADJUSTMENTS = True
+# Gamma range (0.60 - 1.20) will be scaled to this range
+MIN_DESIRED_GAMMA = 0.60
+MAX_DESIRED_GAMMA = 1.20
 
 # --------
 # -- Misc

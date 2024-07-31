@@ -351,9 +351,27 @@ if __name__ == "__main__":
             )
         }
 
-        print(f"Supported Gamma Values: {','.join(str(v) for v in supported_values)}")
-        print(f"Min Gamma Allowed: {min_gamma_allowed}")
-        print(f"Max Gamma Allowed: {max_gamma_allowed}")
+        gamma_map = {
+            y: round(x, 2)
+            for x, y in zip(
+                scale_list(
+                    [
+                        (x / 100)
+                        for x in range(
+                            round(config.MIN_DESIRED_GAMMA * 100),
+                            round(config.MAX_DESIRED_GAMMA * 100),
+                        )
+                    ],
+                    min_gamma_allowed,
+                    max_gamma_allowed,
+                ),
+                supported_values,
+            )
+        }
+
+        print(f"Min Desired Gamma: {config.MIN_DESIRED_GAMMA}")
+        print(f"Max Desired Gamma: {config.MAX_DESIRED_GAMMA}")
+        print(f"Gamma Values: {','.join(str(v) for v in gamma_map.values())}")
         print(f"Mid Point: {mid_point}")
         print(f"Log Mid Point: {log_mid_point}")
         print(
@@ -363,7 +381,7 @@ if __name__ == "__main__":
             f"Max Monitor's Desired Luminance: {config.MAX_DESIRED_MONITOR_LUMINANCE}"
         )
         print(
-            f"Monitor's Luminance Values: {','.join(str(v) for v in luminance_map.values())}\n"
+            f"Monitor's Luminance Values: {','.join(str(v) for v in luminance_map.values())}"
         )
         print()
 
@@ -438,10 +456,10 @@ if __name__ == "__main__":
                     mean_luma = round(mean_luma)
                     adjusted_monitor_luminance = luminance_map[mean_luma]
 
-                adjusted_gamma = round(adjusted_gamma, 2)
                 adjusted_gamma = clamp(
-                    adjusted_gamma, min_gamma_allowed, max_gamma_allowed
+                    round(adjusted_gamma, 2), min_gamma_allowed, max_gamma_allowed
                 )
+                adjusted_gamma = gamma_map[adjusted_gamma]
 
                 change_in_gamma = round(abs(adjusted_gamma - gamma), 2)
                 if (
@@ -629,7 +647,9 @@ if __name__ == "__main__":
                     gamma = adjusted_gamma
 
                     if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                        print(f"Luminance: {adjusted_monitor_luminance} (from {monitor_luminance})")
+                        print(
+                            f"Luminance: {adjusted_monitor_luminance} (from {monitor_luminance})"
+                        )
                         monitor_luminance = vcp_get_luminance(handle)
 
             meta_info = ""
