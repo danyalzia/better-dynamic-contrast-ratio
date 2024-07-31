@@ -19,6 +19,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+
 from functools import cache
 import os
 import dxcam
@@ -32,85 +33,36 @@ from ctypes.wintypes import DWORD, HANDLE, BYTE, WCHAR, HDC
 import config
 
 # Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
-try:
-    if config.CPU_MODE_FORCED:
-        raise ValueError("[!] CPU mode is forced. Using CPU version... \n")
+@cache
+def lum_to_0_100(luminance: float):
+    return (luminance / 255) * 100
 
-    try:
-        import torch
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError("[!] PyTorch not found. Using CPU version... \n")
+@cache
+def sum_to_0_100(summed: float, x: int, y: int):
+    luminance = summed / (x * y)
+    return (luminance / 255) * 100
 
-    if not torch.cuda.is_available():
-        raise ValueError("[!] CUDA is not available. Using CPU version... \n")
+def get_average_luminance1(arr: np.ndarray):
+    total_num_sum = np.prod(arr.shape[:-1])
+    luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
+    return (luminance_total / total_num_sum) * 255
 
-    print("[!] Using PyTorch (CUDA)... \n")
+# ITU BT.709
+def get_average_luminance2(arr: np.ndarray):
+    mean_rgb = arr.reshape(-1, 3).mean(axis=0)
+    luminance = (mean_rgb * [0.2126, 0.7152, 0.0722]).sum()
+    return lum_to_0_100(luminance)
 
-    def get_average_luminance1(arr: np.ndarray):
-        arr = torch.tensor(arr)
-        d = torch.tensor([2550.299, 2550.587, 1770.833])
-        total_num_sum = np.prod(arr.shape[:-1])
-        luminance_total = (arr / d).sum()
-        luminance_total = ((luminance_total / total_num_sum) * 255).cuda().item()
-        return luminance_total
+# ITU BT.601
+def get_average_luminance3(arr: np.ndarray):
+    mean_rgb = arr.reshape(-1, 3).mean(axis=0)
+    luminance = (mean_rgb * [0.299, 0.587, 0.114]).sum()
+    return lum_to_0_100(luminance)
 
-    # ITU BT.709
-    def get_average_luminance2(arr: np.ndarray):
-        arr = torch.tensor(arr)
-        d = torch.tensor([0.2126, 0.7152, 0.0722])
-        mean_rgb = arr.reshape(-1, 3).mean(axis=0, dtype=float)
-        luminance = (mean_rgb * d).sum().cuda().item()
-        return (luminance / 255) * 100
-
-    # ITU BT.601
-    def get_average_luminance3(arr: np.ndarray):
-        arr = torch.tensor(arr)
-        d = torch.tensor([0.299, 0.587, 0.114])
-        mean_rgb = arr.reshape(-1, 3).mean(axis=0, dtype=float)
-        luminance = (mean_rgb * d).sum().cuda().item()
-        return (luminance / 255) * 100
-
-    # Fastest method when the source is grayscale
-    # Will not work in RGB mode
-    def get_average_luminance4(arr: np.ndarray):
-        arr = torch.tensor(arr)
-        l = arr.shape[0] * arr.shape[1]
-        luminance = arr.sum().cuda().item() / l
-        return (luminance / 255) * 100
-
-except (ModuleNotFoundError, ValueError) as err:
-    print(err)
-
-    @cache
-    def lum_to_0_100(luminance: float):
-        return (luminance / 255) * 100
-
-    @cache
-    def sum_to_0_100(summed: float, x: int, y: int):
-        luminance = summed / (x * y)
-        return (luminance / 255) * 100
-
-    def get_average_luminance1(arr: np.ndarray):
-        total_num_sum = np.prod(arr.shape[:-1])
-        luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
-        return (luminance_total / total_num_sum) * 255
-
-    # ITU BT.709
-    def get_average_luminance2(arr: np.ndarray):
-        mean_rgb = arr.reshape(-1, 3).mean(axis=0)
-        luminance = (mean_rgb * [0.2126, 0.7152, 0.0722]).sum()
-        return lum_to_0_100(luminance)
-
-    # ITU BT.601
-    def get_average_luminance3(arr: np.ndarray):
-        mean_rgb = arr.reshape(-1, 3).mean(axis=0)
-        luminance = (mean_rgb * [0.299, 0.587, 0.114]).sum()
-        return lum_to_0_100(luminance)
-
-    # Fastest method when the source is grayscale
-    # Will not work in RGB mode
-    def get_average_luminance4(arr: np.ndarray):
-        return sum_to_0_100(arr.sum(), arr.shape[0], arr.shape[1])
+# Fastest method when the source is grayscale
+# Will not work in RGB mode
+def get_average_luminance4(arr: np.ndarray):
+    return sum_to_0_100(arr.sum(), arr.shape[0], arr.shape[1])
 
 
 class PhysicalMonitor(Structure):

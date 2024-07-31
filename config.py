@@ -31,13 +31,6 @@ MONITOR_INDEX = 0
 # Program must be running at the current refresh rate of monitor otherwise it behaves badly
 TARGET_FPS = 60
 
-# -------------
-# -- Algorithm
-# -------------
-
-# Forcing CPU for now because CPU (numpy based) luminance calculating algorithms are actually faster due to PyTorch/CUDA overhead
-CPU_MODE_FORCED = True
-
 # ------------------------------------
 # -- Monitor's Luminance (Brightness)
 # ------------------------------------

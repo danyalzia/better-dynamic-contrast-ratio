@@ -191,4 +191,4 @@ def set_brightness():
 
 if __name__ == "__main__":
     average_luminance()
-    # set_brightness()
+    set_brightness()
