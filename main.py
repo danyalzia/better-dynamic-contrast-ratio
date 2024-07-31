@@ -435,8 +435,10 @@ if __name__ == "__main__":
                 )
 
                 change_in_gamma = round(abs(adjusted_gamma - gamma), 2)
-
-                if adjusted_gamma != gamma and change_in_gamma <= config.GAMMA_DIFFERENCE_THRESHOLD:
+                if (
+                    adjusted_gamma != gamma
+                    and change_in_gamma > config.GAMMA_DIFFERENCE_THRESHOLD
+                ):
                     if change_in_gamma == 0.01:
                         meta_info = f"Minor change in gamma: {change_in_gamma}"
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
