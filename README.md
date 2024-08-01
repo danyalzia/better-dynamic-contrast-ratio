@@ -7,7 +7,7 @@ This tool makes DCR technology more viable to use on any kind of external SDR mo
 It can also be used to fake the "HDR" effects, but instead of the display making **Local Dimming** (Full Array or Edge-Lit) adjustments (as in the case of real HDR display), it will only be making **Global Dimming** (Direct-Lit) adjustments (along with content gamma adjustments to compensate for poor blacks visibility under low backlight and blinding highlights under high backlight) which is vastly inferior to real HDR but may still be convincing to your eyes.
 
 &nbsp;
-![Backlight Dimming Technologies](https://upload.wikimedia.org/wikipedia/commons/c/cd/Dimming_Techniques.gif "Backlight Dimming Technologies")
+![Backlight Dimming Technologies - Courtesy of Wikipedia](Dimming_Techniques.gif "Backlight Dimming Technologies - Courtesy of Wikipedia")
 
 ## Requirements
 
