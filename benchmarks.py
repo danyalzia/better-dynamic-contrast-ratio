@@ -1,5 +1,6 @@
+import numpy as np
 import time
-import screen_brightness_control as sbc
+import cv2
 from monitorcontrol import get_monitors, VCPError
 import ctypes
 from ctypes.wintypes import (
@@ -13,6 +14,21 @@ from ctypes.wintypes import (
     BYTE,
     WCHAR,
 )
+import win32gui
+import win32ui
+import win32con
+from PIL import ImageGrab
+import dxcam
+from main import (
+    get_average_luminance1,
+    get_average_luminance2,
+    get_average_luminance3,
+    get_average_luminance4,
+)
+import dxcam
+from main import get_average_luminance4, win32_frame, clean_win32
+import mss
+import screen_brightness_control as sbc
 
 
 class PhysicalMonitor(ctypes.Structure):
@@ -69,35 +85,13 @@ def raw_set_brightness(handle, value):
     ctypes.windll.dxva2.SetVCPFeature(HANDLE(handle), BYTE(0x10), DWORD(value))
 
 
-def raw_get_brightness(handle):
-    feature_current = DWORD()
-    feature_max = DWORD()
-
-    ctypes.windll.dxva2.GetVCPFeatureAndVCPFeatureReply(
-        HANDLE(handle),
-        BYTE(0x10),
-        None,
-        ctypes.byref(feature_current),
-        ctypes.byref(feature_max),
-    )
-
-    return feature_current.value
-
-
 def average_luminance():
-    import dxcam
-    from main import (
-        get_average_luminance1,
-        get_average_luminance2,
-        get_average_luminance3,
-        get_average_luminance4,
-    )
 
     camera = dxcam.create(output_idx=0, output_color="GRAY")
     camera.start(target_fps=60)
     frame = camera.get_latest_frame()
 
-    samples = 120
+    samples = 60
 
     current_time = time.time()
     for _ in range(samples):
@@ -123,6 +117,7 @@ def average_luminance():
 
 
 def set_brightness():
+
     monitor = get_monitors()[0]
 
     sbc.set_brightness(0)
@@ -189,6 +184,79 @@ def set_brightness():
     sbc.set_brightness(20)
 
 
+def win32_frame(w, h):
+    hwnd = win32gui.GetActiveWindow()
+
+    wDC = win32gui.GetWindowDC(hwnd)
+    dcObj = win32ui.CreateDCFromHandle(wDC)
+    cDC = dcObj.CreateCompatibleDC()
+    dataBitMap = win32ui.CreateBitmap()
+    dataBitMap.CreateCompatibleBitmap(dcObj, w, h)
+    cDC.SelectObject(dataBitMap)
+    cDC.BitBlt((0, 0), (w, h), dcObj, (0, 0), win32con.SRCCOPY)
+
+    signedIntsArray = dataBitMap.GetBitmapBits(True)
+    frame = np.frombuffer(signedIntsArray, dtype="uint8")
+    frame.shape = (h, w, 4)
+    return hwnd, wDC, dcObj, cDC, dataBitMap, frame
+
+
+def clean_win32(hwnd, wDC, dcObj, cDC, dataBitMap):
+    dcObj.DeleteDC()
+    cDC.DeleteDC()
+    win32gui.ReleaseDC(hwnd, wDC)
+    win32gui.DeleteObject(dataBitMap.GetHandle())
+
+
+def frame_capture():
+
+    samples = 20
+
+    camera = dxcam.create(output_idx=0, output_color="GRAY")
+    camera.start(target_fps=60)
+
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        frame = camera.get_latest_frame()
+        luma = get_average_luminance4(frame)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        img = ImageGrab.grab()
+        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+        luma = get_average_luminance4(img)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+
+    sct = mss.mss()
+    monitor = sct.monitors[1]
+
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        img = sct.grab(monitor)
+        img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+        luma = get_average_luminance4(img)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+    sct.close()
+
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        hwnd, wDC, dcObj, cDC, dataBitMap, frame = win32_frame(1920, 1200)
+        img = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2GRAY)
+        luma = get_average_luminance4(img)
+        clean_win32(hwnd, wDC, dcObj, cDC, dataBitMap)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+
+
 if __name__ == "__main__":
     average_luminance()
     set_brightness()
+    frame_capture()

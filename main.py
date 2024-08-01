@@ -19,10 +19,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+from pixel_forge import Capture, enumerate_monitors
 
 from functools import cache
 import os
-import dxcam
+import cv2
 import math
 
 import time
@@ -32,20 +33,24 @@ from ctypes.wintypes import DWORD, HANDLE, BYTE, WCHAR, HDC
 
 import config
 
+
 # Luminance calculating algorithms: https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color
 @cache
 def lum_to_0_100(luminance: float):
     return (luminance / 255) * 100
+
 
 @cache
 def sum_to_0_100(summed: float, x: int, y: int):
     luminance = summed / (x * y)
     return (luminance / 255) * 100
 
+
 def get_average_luminance1(arr: np.ndarray):
     total_num_sum = np.prod(arr.shape[:-1])
     luminance_total = (arr / [2550.299, 2550.587, 1770.833]).sum()
     return (luminance_total / total_num_sum) * 255
+
 
 # ITU BT.709
 def get_average_luminance2(arr: np.ndarray):
@@ -53,11 +58,13 @@ def get_average_luminance2(arr: np.ndarray):
     luminance = (mean_rgb * [0.2126, 0.7152, 0.0722]).sum()
     return lum_to_0_100(luminance)
 
+
 # ITU BT.601
 def get_average_luminance3(arr: np.ndarray):
     mean_rgb = arr.reshape(-1, 3).mean(axis=0)
     luminance = (mean_rgb * [0.299, 0.587, 0.114]).sum()
     return lum_to_0_100(luminance)
+
 
 # Fastest method when the source is grayscale
 # Will not work in RGB mode
@@ -263,6 +270,9 @@ def get_adjusted_gamma(log_mid_point: float, mean_luma: float):
 
 
 if __name__ == "__main__":
+    # Ignore annoying divide by zero and overflow warnings
+    np.seterr(divide="ignore", over="ignore")
+
     if config.GAMMA_RAMP_ADJUSTMENTS:
         GetDC = windll.user32.GetDC
         SetDeviceGammaRamp = windll.gdi32.SetDeviceGammaRamp
@@ -285,24 +295,6 @@ if __name__ == "__main__":
             supported_values
         )
 
-        mid_point = (
-            ((min_gamma_allowed + max_gamma_allowed) / 2) / 10
-        ) + config.MID_POINT_BIAS
-
-        log_mid_point = math.log(mid_point * 255)
-
-        luminance_map = {
-            y: int(x)
-            for x, y in zip(
-                scale_list(
-                    list(range(101)),
-                    config.MIN_DESIRED_MONITOR_LUMINANCE,
-                    config.MAX_DESIRED_MONITOR_LUMINANCE,
-                ),
-                list(range(101)),
-            )
-        }
-
         gamma_map = {
             y: round(x, 2)
             for x, y in zip(
@@ -321,28 +313,40 @@ if __name__ == "__main__":
             )
         }
 
+        mid_point = (
+            ((list(gamma_map)[0] + list(gamma_map)[-1]) / 2) / 10
+        ) + config.MID_POINT_BIAS
+
+        log_mid_point = math.log(mid_point * 255)
+
         print(f"Min Desired Gamma: {config.MIN_DESIRED_GAMMA}")
         print(f"Max Desired Gamma: {config.MAX_DESIRED_GAMMA}")
         print(f"Gamma Values: {','.join(str(v) for v in gamma_map.values())}")
         print(f"Mid Point: {mid_point}")
         print(f"Log Mid Point: {log_mid_point}")
-        print(
-            f"Min Monitor's Desired Luminance: {config.MIN_DESIRED_MONITOR_LUMINANCE}"
-        )
-        print(
-            f"Max Monitor's Desired Luminance: {config.MAX_DESIRED_MONITOR_LUMINANCE}"
-        )
-        print(
-            f"Monitor's Luminance Values: {','.join(str(v) for v in luminance_map.values())}"
-        )
         print()
 
         # Start with a darkened image
         gamma = min_gamma_allowed
         set_gamma(SetDeviceGammaRamp, hdc, default_gamma_ramp, gamma)
 
-        # Ignore annoying divide by zero and overflow warnings
-        np.seterr(divide="ignore", over="ignore")
+    luminance_map = {
+        y: int(x)
+        for x, y in zip(
+            scale_list(
+                list(range(101)),
+                config.MIN_DESIRED_MONITOR_LUMINANCE,
+                config.MAX_DESIRED_MONITOR_LUMINANCE,
+            ),
+            list(range(101)),
+        )
+    }
+    print(f"Min Monitor's Desired Luminance: {config.MIN_DESIRED_MONITOR_LUMINANCE}")
+    print(f"Max Monitor's Desired Luminance: {config.MAX_DESIRED_MONITOR_LUMINANCE}")
+    print(
+        f"Monitor's Luminance Values: {','.join(str(v) for v in luminance_map.values())}"
+    )
+    print()
 
     handle = get_primary_monitor_handle()
 
@@ -350,20 +354,24 @@ if __name__ == "__main__":
     print(f"Default Monitor's Luminance: {default_monitor_luminance}")
     print()
 
+    camera = Capture()
+
     try:
-        camera = dxcam.create(output_idx=config.MONITOR_INDEX, output_color="GRAY")
+        m = enumerate_monitors()[config.MONITOR_INDEX]
     except IndexError as e:
         raise RuntimeError(
             f"Monitor at index {config.MONITOR_INDEX} is not available, please try a different value."
         ) from e
 
-    camera.start(target_fps=config.TARGET_FPS)
+    camera.start(m)
 
     try:
         while True:
             monitor_luminance = vcp_get_luminance(handle)
 
-            frame = camera.get_latest_frame()
+            frame = camera.frame()
+
+            frame = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2GRAY)
 
             try:
                 mean_luma = get_average_luminance4(frame)
@@ -708,7 +716,7 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("\n[!] Program is interrupted.\n")
-        del camera
+        camera.stop()
 
         if config.GAMMA_RAMP_ADJUSTMENTS:
             ReleaseDC = windll.user32.ReleaseDC

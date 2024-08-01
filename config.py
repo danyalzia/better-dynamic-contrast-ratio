@@ -27,9 +27,6 @@
 # If two monitors are connected then by default the program will run on primary monitor
 # Set it to 1 to run on external/second monitor
 MONITOR_INDEX = 0
-# VRR is not currently supported
-# Program must be running at the current refresh rate of monitor otherwise it behaves badly
-TARGET_FPS = 60
 
 # ------------------------------------
 # -- Monitor's Luminance (Brightness)
