@@ -33,7 +33,7 @@ MONITOR_INDEX = 0
 # ------------------------------------
 
 MONITOR_LUMINANCE_ADJUSTMENTS = True
-MONITOR_LUMINANCE_INSTANT_ADJUSTMENTS = False
+MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS = False
 
 # Monitor's Brightness range (0 - 100) will be scaled to this range
 # Shorter ranges provide better luminance stability but dramatic shifts

@@ -156,7 +156,7 @@ def get_gamma_allowed_values(SetDeviceGammaRamp, hdc, gamma_ramp):
         NewRamps = np.uint16(np.round(np.multiply(Scale, gamma_ramp)))
 
         if not SetDeviceGammaRamp(hdc, NewRamps.ctypes):  # 0-1 = False/True
-            value += 0.01
+            continue
         else:
             supported_values.append(value)
 
@@ -219,43 +219,47 @@ def fade_gamma_luminance_combined(
     hdc,
     gamma_ramp,
     handle,
-    mid_point: float,
     gammaFinish: float,
     gammaStart: float,
     luminanceFinish: float,
     luminanceStart: float,
-    interval: float = 0.01,
-    increment: float = 0.01,
+    gammaInterval: float = 0.01,
+    gammaIncrement: float = 0.01,
+    luminanceInterval: float = 0.01,
+    luminanceIncrement: int = 1,
 ):
     finishInt = round(gammaFinish * 100)
     startInt = round(gammaStart * 100)
-    incrementInt = round(abs(increment * 100))
+    incrementInt = round(abs(gammaIncrement * 100))
 
     if startInt > finishInt:
         incrementInt = -incrementInt
 
     next_change_start_time = time.time()
 
-    scaled = scale_list(
-        list(range(startInt, finishInt, incrementInt)),
-        luminanceFinish,
-        luminanceStart,
-    )
-
-    if gammaFinish > (mid_point * 10):
-        scaled = list(reversed(scaled))
-
-    for n, valueInt in enumerate(range(startInt, finishInt, incrementInt)):
-
+    for valueInt in range(startInt, finishInt, incrementInt):
         value = valueInt / 100
 
         set_gamma(SetDeviceGammaRamp, hdc, gamma_ramp, value)
 
-        luminanceInt = int(scaled[n])
-        # print(f"L: {luminanceInt}, {luminanceFinish}, {luminanceStart}")
+        next_change_start_time += gammaInterval
+        sleep_time = next_change_start_time - time.time()
+
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+    if luminanceStart > luminanceFinish:
+        luminanceIncrement = -luminanceIncrement
+
+    luminanceFinishInt = int(luminanceFinish)
+    luminanceStartInt = int(luminanceStart)
+
+    for luma in range(luminanceStartInt, luminanceFinishInt, luminanceIncrement):
+        luminanceInt = int(luma)
+        # print(f"L: {luminanceInt}, {luminanceFinishInt}, {luminanceStartInt}")
         vcp_set_luminance(handle, luminanceInt)
 
-        next_change_start_time += interval
+        next_change_start_time += luminanceInterval
         sleep_time = next_change_start_time - time.time()
 
         if sleep_time > 0:
@@ -299,22 +303,18 @@ if __name__ == "__main__":
             y: round(x, 2)
             for x, y in zip(
                 scale_list(
-                    [
-                        (x / 100)
-                        for x in range(
-                            round(config.MIN_DESIRED_GAMMA * 100),
-                            round(config.MAX_DESIRED_GAMMA * 100),
-                        )
-                    ],
-                    min_gamma_allowed,
-                    max_gamma_allowed,
+                    supported_values,
+                    max(min_gamma_allowed, config.MIN_DESIRED_GAMMA),
+                    min(max_gamma_allowed, config.MAX_DESIRED_GAMMA),
                 ),
                 supported_values,
             )
         }
 
+        min_gamma_allowed, max_gamma_allowed = list(gamma_map)[0], list(gamma_map)[-1]
+
         mid_point = (
-            ((list(gamma_map)[0] + list(gamma_map)[-1]) / 2) / 10
+            ((min_gamma_allowed + max_gamma_allowed) / 2) / 10
         ) + config.MID_POINT_BIAS
 
         log_mid_point = math.log(mid_point * 255)
@@ -322,6 +322,8 @@ if __name__ == "__main__":
         print(f"Min Desired Gamma: {config.MIN_DESIRED_GAMMA}")
         print(f"Max Desired Gamma: {config.MAX_DESIRED_GAMMA}")
         print(f"Gamma Values: {','.join(str(v) for v in gamma_map.values())}")
+        print(f"Min Allowed Gamma: {min_gamma_allowed}")
+        print(f"Max Allowed Gamma: {max_gamma_allowed}")
         print(f"Mid Point: {mid_point}")
         print(f"Log Mid Point: {log_mid_point}")
         print()
@@ -428,6 +430,7 @@ if __name__ == "__main__":
                 ):
                     if change_in_gamma == 0.01:
                         meta_info = f"Minor change in gamma: {change_in_gamma}"
+
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
                             set_gamma(
                                 SetDeviceGammaRamp,
@@ -446,20 +449,35 @@ if __name__ == "__main__":
 
                     elif change_in_gamma >= 0.10 and change_in_gamma < 0.20:
                         meta_info = f"Small change in gamma: {change_in_gamma}"
+
+                        gammaIncrement = 0.02
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.02,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=2,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -468,25 +486,40 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.02,
+                                increment=gammaIncrement,
                             )
 
                     elif change_in_gamma >= 0.20 and change_in_gamma < 0.30:
                         meta_info = f"Moderate change in gamma: {change_in_gamma}"
+
+                        gammaIncrement = 0.03
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.03,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=3,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -495,24 +528,39 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.03,
+                                increment=gammaIncrement,
                             )
                     elif change_in_gamma >= 0.30 and change_in_gamma < 0.40:
                         meta_info = f"Large change in gamma: {change_in_gamma}"
+
+                        gammaIncrement = 0.04
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.04,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=4,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -521,24 +569,39 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.04,
+                                increment=gammaIncrement,
                             )
                     elif change_in_gamma >= 0.40 and change_in_gamma < 0.50:
                         meta_info = f"Huge change in gamma: {change_in_gamma} (Note: It can be avoided)"
+
+                        gammaIncrement = 0.06
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.05,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=3,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -547,24 +610,39 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.05,
+                                increment=gammaIncrement,
                             )
                     elif change_in_gamma >= 0.50 and change_in_gamma < 0.60:
                         meta_info = f"Sudden change in gamma: {change_in_gamma} (Note: It must be avoided)"
+
+                        gammaIncrement = 0.08
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.06,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=4,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -573,23 +651,37 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.06,
+                                increment=gammaIncrement,
                             )
                     else:
+                        gammaIncrement = 0.01
                         if config.MONITOR_LUMINANCE_ADJUSTMENTS:
-                            fade_gamma_luminance_combined(
-                                SetDeviceGammaRamp,
-                                hdc,
-                                default_gamma_ramp,
-                                handle,
-                                mid_point,
-                                gammaFinish=adjusted_gamma,
-                                gammaStart=gamma,
-                                luminanceFinish=adjusted_monitor_luminance,
-                                luminanceStart=monitor_luminance,
-                                interval=0.01,
-                                increment=0.01,
-                            )
+                            if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
+                                fade_gamma(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    finish=adjusted_gamma,
+                                    start=gamma,
+                                    interval=0.01,
+                                    increment=gammaIncrement,
+                                )
+                                vcp_set_luminance(handle, adjusted_monitor_luminance)
+                            else:
+                                fade_gamma_luminance_combined(
+                                    SetDeviceGammaRamp,
+                                    hdc,
+                                    default_gamma_ramp,
+                                    handle,
+                                    gammaFinish=adjusted_gamma,
+                                    gammaStart=gamma,
+                                    luminanceFinish=adjusted_monitor_luminance,
+                                    luminanceStart=monitor_luminance,
+                                    gammaInterval=0.01,
+                                    gammaIncrement=gammaIncrement,
+                                    luminanceInterval=0.01,
+                                    luminanceIncrement=1,
+                                )
                         else:
                             fade_gamma(
                                 SetDeviceGammaRamp,
@@ -598,7 +690,7 @@ if __name__ == "__main__":
                                 finish=adjusted_gamma,
                                 start=gamma,
                                 interval=0.01,
-                                increment=0.01,
+                                increment=gammaIncrement,
                             )
 
                     print(
@@ -630,7 +722,7 @@ if __name__ == "__main__":
                 ):
                     continue
 
-                if config.MONITOR_LUMINANCE_INSTANT_ADJUSTMENTS:
+                if config.MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS:
                     vcp_set_luminance(handle, adjusted_monitor_luminance)
                 else:
                     # Adaptive increments

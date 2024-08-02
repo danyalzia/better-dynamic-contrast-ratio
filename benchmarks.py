@@ -14,6 +14,7 @@ from ctypes.wintypes import (
     BYTE,
     WCHAR,
 )
+from pixel_forge import Capture, enumerate_monitors
 import win32gui
 import win32ui
 import win32con
@@ -26,7 +27,7 @@ from main import (
     get_average_luminance4,
 )
 import dxcam
-from main import get_average_luminance4, win32_frame, clean_win32
+from main import get_average_luminance4
 import mss
 import screen_brightness_control as sbc
 
@@ -112,7 +113,7 @@ def average_luminance():
     for _ in range(samples):
         luma = get_average_luminance4(frame)
     print(f"Luma4: {luma} ------------- took {time.time() - current_time} seconds")
-
+    
     del camera
 
 
@@ -210,18 +211,18 @@ def clean_win32(hwnd, wDC, dcObj, cDC, dataBitMap):
 
 def frame_capture():
 
-    samples = 20
+    samples = 60
 
-    camera = dxcam.create(output_idx=0, output_color="GRAY")
-    camera.start(target_fps=60)
+    # camera = dxcam.create(output_idx=0, output_color="GRAY")
+    # camera.start(target_fps=60)
 
-    current_time = time.perf_counter()
-    for _ in range(samples):
-        frame = camera.get_latest_frame()
-        luma = get_average_luminance4(frame)
-    print(
-        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
-    )
+    # current_time = time.perf_counter()
+    # for _ in range(samples):
+    #     frame = camera.get_latest_frame()
+    #     luma = get_average_luminance4(frame)
+    # print(
+    #     f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    # )
 
     current_time = time.perf_counter()
     for _ in range(samples):
@@ -255,6 +256,37 @@ def frame_capture():
         f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
     )
 
+    camera = Capture()
+    m = enumerate_monitors()[0]
+    camera.start(m)
+    
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        frame = camera.frame()
+        img = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2GRAY)
+        luma = get_average_luminance4(img)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+    
+    from PIL import Image
+    
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        frame = camera.frame()
+        img = np.array(Image.fromarray(frame).convert('L')).astype(np.uint)
+        luma = get_average_luminance4(img)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
+    
+    current_time = time.perf_counter()
+    for _ in range(samples):
+        frame = camera.frame()
+        luma = get_average_luminance4(img)
+    print(
+        f"Luma: {luma} ------------- took {time.perf_counter() - current_time} seconds"
+    )
 
 if __name__ == "__main__":
     average_luminance()
