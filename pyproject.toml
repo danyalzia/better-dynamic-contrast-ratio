@@ -1,0 +1,28 @@
+[tool.black]
+include = '\.py$'
+line-length = 88
+target-version = ['py312']
+
+[tool.isort]
+float_to_top = true
+include_trailing_comma = true
+known_first_party = "build"
+lines_after_imports = 2
+lines_between_types = 1
+multi_line_output = 3
+profile = "black"
+skip = []
+skip_glob = ".venv, */build, */.git"
+
+[tool.pyright]
+exclude = ["**/node_modules", "**/__pycache__", "**/.venv", "scripts"]
+include = ["."]
+venv = ".venv"
+
+reportImportCycles = true
+reportMissingImports = true
+reportPrivateUsage = true
+reportMissingTypeStubs = false
+reportUnknownLambdaType = false
+reportUnknownMemberType = false
+reportUntypedFunctionDecorator = false

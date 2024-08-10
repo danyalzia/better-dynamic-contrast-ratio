@@ -35,10 +35,14 @@ MONITOR_INDEX = 0
 MONITOR_LUMINANCE_ADJUSTMENTS = True
 MONITOR_LUMINANCE_FORCE_INSTANT_ADJUSTMENTS = False
 
-# Monitor's Brightness range (0 - 100) will be scaled to this range
+# Monitor's Brightness range (0 - 100) will be scaled linearly to this range
 # Shorter ranges provide better luminance stability but dramatic shifts
-MIN_DESIRED_MONITOR_LUMINANCE = 10
-MAX_DESIRED_MONITOR_LUMINANCE = 50
+MIN_DESIRED_MONITOR_LUMINANCE = 0
+MAX_DESIRED_MONITOR_LUMINANCE = 100
+
+# If string is not empty, then use custom mapping from the file
+# It will do non-linear scaling according to: Luma = Monitor's Brightness
+MONITOR_LUMINANCE_CUSTOM_MAPPING = "luma.txt"  # MIN_DESIRED_MONITOR_LUMINANCE and MAX_DESIRED_MONITOR_LUMINANCE settings will be ignored
 
 # ---------
 # -- Gamma
@@ -48,6 +52,12 @@ GAMMA_RAMP_ADJUSTMENTS = True
 # Gamma range (0.60 - 1.20) will be scaled to this range
 MIN_DESIRED_GAMMA = 0.60
 MAX_DESIRED_GAMMA = 1.20
+
+# If string is not empty, then use custom mapping from the file
+# It will do non-linear scaling according to: Adjusted Gamma = Gamma
+GAMMA_CUSTOM_MAPPING = (
+    "gamma.txt"  # MIN_DESIRED_GAMMA and MAX_DESIRED_GAMMA settings will be ignored
+)
 
 # --------
 # -- Misc

@@ -1,6 +1,7 @@
 *.exe
 *.npy
-pixel_forge_src/
+*.dat
+scripts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
